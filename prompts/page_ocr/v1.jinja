@@ -1,0 +1,266 @@
+{% if previous_context %}
+【CONTEXT FROM PREVIOUS PAGE】:
+{{ previous_context }}
+
+IMPORTANT INSTRUCTIONS FOR USING CONTEXT:
+1. The context above shows the last 500 characters and the last 3 courses from the previous page
+2. If the current page starts with course listings but has NO department/level header visible:
+   - Check the department from the last courses in the context
+   - If those courses have a department and the current page seems to continue, use the SAME department
+   - If those courses have a level and the current page seems to continue, use the SAME level
+3. If the current page has a NEW department header, IGNORE the context and use the new department
+4. If the course level continues logically (e.g., previous page ended with Freshman, current starts with Sophomore), it's likely a continuation
+5. Use the context intelligently - only apply it when it makes logical sense
+
+{% endif %}Please carefully analyze this image of an 1800s American university course catalog.
+
+This is a TWO-PART task:
+1. First extract ALL raw text with detailed structure (Part 1)
+2. Then parse course information from the extracted text (Part 2)
+
+═══════════════════════════════════════════════════════════════════════
+PART 1: RAW OCR TEXT RECOGNITION (STRUCTURAL EXTRACTION)
+═══════════════════════════════════════════════════════════════════════
+
+【REQUIREMENTS】:
+1. ⚠️ **COMPLETENESS IS THE FIRST PRIORITY**: Extract EVERY word from the MAIN PAGE CONTENT (see boundary detection below)
+2. Maintain original typographic format (line breaks, indentation)
+3. Mark font styles for major sections (headings, bold, italic, uppercase, etc.)
+4. If there are tables, describe table structure
+5. If multi-column layout, note it in layout_description
+6. Mark any unclear, blurry, or damaged text with [unclear] or [damaged]
+
+【CRITICAL - PAGE BOUNDARY DETECTION】:
+⚠️ You MUST distinguish between MAIN PAGE CONTENT and EDGE BLEED from adjacent pages.
+
+**1. Visual Indicators of MAIN CONTENT (EXTRACT THIS):**
+✓ Text within central 70% of page width (roughly 15%-85% horizontal range)
+✓ Text inside decorative borders or frames (if present on the page)
+✓ Text with consistent alignment and formatting
+✓ Complete sentences and paragraphs
+✓ Clear section headings (e.g., "FIRST YEAR", "THEOLOGICAL DEPARTMENT", "BUILDINGS")
+✓ Text with proper margins and spacing
+✓ Content that forms a coherent, complete document section
+
+**2. Visual Indicators of EDGE BLEED to DISCARD:**
+✗ Text at extreme left margin (< 20% of page width from left edge)
+✗ Text at extreme right margin (> 80% of page width from right edge)
+✗ Text cut off mid-word or mid-sentence at page edges
+✗ Text with different orientation (rotated/sideways compared to main content)
+✗ Blurred text in binding shadow area (typically near the spine/left edge)
+✗ Text OUTSIDE decorative page borders (if borders are present)
+✗ Fragmentary words or partial course names at margins
+✗ Text that appears to be a continuation from another page's edge
+
+**3. Decision Process:**
+STEP 1: Identify if there's a decorative border/frame
+   → If YES: Extract ONLY content INSIDE the border
+   → If NO: Proceed to STEP 2
+
+STEP 2: Examine left and right margins
+   → Is there text at extreme edges (< 10% or > 90% width)?
+   → Is that edge text complete or cut-off/fragmentary?
+   → Does it have different formatting/orientation?
+   
+STEP 3: Extract only coherent main content
+   → MAIN CONTENT: Properly aligned, complete, within borders/central area
+   → EDGE BLEED: At extreme margins, cut-off, outside borders - DO NOT extract
+
+**4. Example from your uploaded image:**
+The page has a decorative wavy border frame:
+✓ EXTRACT: All text INSIDE the border (course listings, headings, descriptions)
+✗ DISCARD: Text on far left margin outside the border (fragments like "STUDY", "institution", "Greek Testa", "SECOND TER", etc.)
+✗ DISCARD: These are clearly from adjacent pages - they're outside the border, cut-off, and don't align with main content
+**Example of EDGE BLEED (DO NOT EXTRACT):**
+"TERMS AL\n1. The Collegiate Year com\ndivided into two terms of five\nInst Monday in October"
+→ Multiple cut-off words ("com", "Inst"), incomplete sentences
+→ This is clearly from an adjacent page
+→ Mark as discarded, do NOT extract
+
+【OUTPUT TO raw_ocr OBJECT】:
+{% raw %}{{  
+  "text_blocks": [
+    {{
+      "block_id": 1,
+      "position": "top | center | bottom | left-column | right-column",
+      "content_type": "heading | paragraph | course_list | table | other",
+      "text": "Complete text of this visual block",
+      "font_style": "large-heading | bold | italic | uppercase | normal | small",
+      "is_main_content": true
+    }}
+    
+    ⚠️ IMPORTANT FOR LONG PAGES: 
+  - Replace excessive dot sequences (more than 5 dots) with just 5 dots
+  - Replace excessive spaces with just a few spaces
+  
+  ],
+  
+  "discarded_edge_content": {{
+    "left_edge": "brief sample of left edge content (if any)",
+    "right_edge": "brief sample of right edge content (if any)",
+    "reason": "outside border | cut-off | binding shadow | different orientation"
+  }},
+  
+  "layout_description": "Overall page layout: single-column/two-column/three-column, has decorative border (yes/no), special formatting notes"
+}}{% endraw %}
+
+**IMPORTANT NOTES ON text_blocks:**
+- Each block represents a VISUAL/LOGICAL section (not individual lines!)
+- Examples of blocks:
+  * A main heading → 1 block
+  * A paragraph of description → 1 block  
+  * A section of course listings under one term → 1 block
+  * A table → 1 block
+- DO NOT create separate blocks for each line
+- Typically a page will have 3-8 blocks total, not dozens
+
+**Example block division for the uploaded image:**
+Block 1: Introductory paragraph ("The English and Scientific Course embraces...")
+Block 2: "FIRST YEAR" heading + all first year courses
+Block 3: "SECOND YEAR" heading + all second year courses
+Block 4: "THIRD YEAR" heading + all third year courses
+Block 5: Explanatory paragraph ("The studies of the Scientific Course...")
+Block 6: "THEOLOGICAL DEPARTMENT" section
+═══════════════════════════════════════════════════════════════════════
+PART 2: COURSE INFORMATION PARSING (FROM THE EXTRACTED TEXT)
+═══════════════════════════════════════════════════════════════════════
+
+【IMPORTANT PARSING RULES】:
+
+1. **Use ONLY the main content area** (ignore edge-bleed blocks from Part 1)
+2. **Course Separation Recognition (CRITICAL)**:
+   - Multiple courses are often separated by semicolons (;) OR commas (,)
+   - **Semicolon example**: "Horace and Demosthenes; French, or Spanish and Rhetoric; Mechanics (Peck)" = THREE courses
+   - **Comma example**: "Natural Philosophy, Physiology, Geometry, History, and French or Latin" = FIVE courses
+   - **Key rule**: When you see subjects separated by commas/semicolons in the same term → SEPARATE courses
+   - Do NOT merge multiple courses into one entry
+   - "and" or "or" within a name is usually part of ONE course (e.g., "French or Latin" = ONE course)
+
+3. **DESCRIPTION vs NEXT COURSE**:
+   ⚠️ **ABSOLUTE PRIORITY RULE**: 
+   - If text is separated by comma/semicolon and looks like a subject name → NEW COURSE
+   - Only treat as description if it clearly explains/describes the current course
+
+   **Pattern Recognition for SEPARATE COURSES:**
+   - "Subject A, Subject B, Subject C" = THREE courses
+   - Do NOT treat later subjects as descriptions
+
+   **Examples:**
+
+   ❌ WRONG (your actual error):
+   Input: "English Grammar and Arithmetic reviewed, Natural Philosophy, and Algebra"
+   {% raw %}Wrong: {{"course_name": "English Grammar and Arithmetic reviewed", "description": "Natural Philosophy, and Algebra"}}{% endraw %}
+
+   ✅ CORRECT:
+   THREE separate courses:
+   [
+     {% raw %}{{"course_name": "English Grammar and Arithmetic reviewed", "description": null}},
+     {{"course_name": "Natural Philosophy", "description": null}},
+     {{"course_name": "Algebra", "description": null}}{% endraw %}
+   ]
+
+   ✅ CORRECT - Actual description (starts with lowercase, explains the course):
+   Input: "Church History, a critical examination of the history of the more important Heresies"
+   {% raw %}Output: {{"course_name": "Church History", "description": "a critical examination of the history of the more important Heresies"}}{% endraw %}
+
+4. **Department Information**:
+   - Look for department names (e.g., "Classical Department", "Scientific Department")
+   - Associate courses with their departments when visible
+   - Department info may appear as headers or section titles
+
+5. **Text Recognition Accuracy**:
+   - Maintain accuracy of original text, especially proper nouns
+   - Note 19th-century spelling conventions
+
+【JSON OUTPUT FORMAT】:
+
+{% raw %}{{
+    "raw_ocr": {{
+      "text_blocks": [
+        {{
+          "block_id": 1,
+          "position": "position description",
+          "text": "block text",
+          "font_style": "style description",
+          "text_alignment": "alignment"
+        }}
+      ],
+      "layout_description": "layout description"
+    }},
+
+    "page_info": {{
+        "page_number": "page number if visible, or null",
+        "is_complete_page": true,
+        "content_type": "courses | facilities | administration | other"
+    }},
+
+    "school_name": "school name or null",
+    "catalog_year": "catalog year or null",
+    "academic_year": "academic year (e.g., 1850-1851) or null",
+
+    "courses": [
+        {{
+            "course_name": "SHORT course name only (e.g., 'Systematic Theology')",
+            "department": "department name or null",
+            "level": "course level (Freshman, Sophomore, Junior, Senior, Graduate, First Year, Second Year, etc.) or null",
+            "topics": ["list of specific topics or subtopics"] or null,
+            "textbooks": [
+                {{
+                    "title": "textbook title",
+                    "author": "author name or null"
+                }}
+            ],
+            "term": "term (First Term, Second Term, Full Year, Winter Session, etc.) or null",
+            "instructors": ["instructor names"] or null,
+            "description": "additional explanations, notes. NOT the next course name!"
+        }}
+    ]
+}}{% endraw %}
+
+【CRITICAL OUTPUT REQUIREMENTS】:
+1. **raw_ocr**: MUST ALWAYS be present with complete structural text extraction
+2. **ALL fields must be present** - NEVER omit any field
+3. **If a field has no information, set it to null** - do NOT omit the field
+4. **Consistent structure**: Every JSON output must have the same fields in the same order
+5. **For courses array**: Each course must have all fields even if some are null
+6. **For textbooks array**: Each textbook must have both title and author fields (use null if not available)
+7. **content_type**: Identify what the main content is about (courses/facilities/administration/other)
+8. **If main content is NOT about courses**, return empty courses array: []
+9. Return JSON directly, no markdown markers (like ```json)
+10. Ensure JSON is complete and properly closed - all brackets must match
+
+【COURSE SEPARATION EXAMPLES】:
+
+Example 1 - Comma-separated courses:
+Input: "SECOND TERM: Natural Philosophy, Physiology, Geometry, History, and French or Latin."
+Output: FIVE separate courses with term="Second Term":
+- "Natural Philosophy"
+- "Physiology"
+- "Geometry"
+- "History"
+- "French or Latin"
+
+Example 2 - Semicolon-separated:
+Input: "Horace and Demosthenes; French, or Spanish and Rhetoric; Mechanics (Peck)"
+Output: THREE courses:
+- "Horace and Demosthenes"
+- "French, or Spanish and Rhetoric"
+- "Mechanics" (textbook author: Peck)
+
+Example 3 - Department context:
+Input: "CLASSICAL DEPARTMENT. FRESHMAN CLASS: Latin (Caesar), Greek (Xenophon)"
+Output:
+- Course 1: "Latin", department: "Classical Department", level: "Freshman", textbooks: [{% raw %}{{"title": "Caesar", "author": null}}{% endraw %}]
+- Course 2: "Greek", department: "Classical Department", level: "Freshman", textbooks: [{% raw %}{{"title": "Xenophon", "author": null}}{% endraw %}]
+
+Example 4 - Course with topics:
+Input: "Systematic Theology, a more extensive course of study, on Natural Religion, doctrines of Revelation"
+Output:
+{% raw %}{{
+  "course_name": "Systematic Theology",
+  "topics": ["Natural Religion", "doctrines of Revelation"],
+  "description": "A more extensive course of study"
+}}{% endraw %}
+
+Please analyze the image now and return a complete JSON result with ALL fields present, including the complete raw_ocr section.
+
