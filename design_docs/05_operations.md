@@ -5,12 +5,29 @@
 | Failure Type | Description | System Response | Operational Action |
 | :--- | :--- | :--- | :--- |
 | **Network / 5xx** | Transient HTTP error during submission or polling. | **Prefect Task Retry.** The specific task retries automatically (e.g., 3 times). | None. |
-| **Batch Job Fail** | Google Batch API returns `state="FAILED"` (rare). | **Flow Logic.** Logs error, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
+| **File Upload Failure** | Image file upload to File API fails (network, timeout, size limit). | **Retry with Exponential Backoff.** Re-upload the image file up to configured max retries. | None. If all retries fail, the page is skipped for this batch cycle. |
+| **Batch Job Fail** | Gemini Batch API returns `JOB_STATE_FAILED`. | **Flow Logic.** Logs error, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
+| **Batch Job Cancelled** | Batch job is cancelled (manual or timeout). | **Flow Logic.** Logs warning, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
+| **Batch Job Expired** | Batch job expires before completion. | **Flow Logic.** Logs warning, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
 | **Validation Error** | Model returns valid JSON, but schema validation fails (e.g., missing fields). | **Partial Failure.** Output NOT written. `RECORD_FAILURE_COUNTS` var incremented. | None. Scanner will re-queue pending retry limit. |
-| **Max Retries** | Specific Page fails validation > `GlobalConfig.max_retries`. | **Dead Letter.** Scanner sees count > limit and skips this page. | **Manual Intervention** required to fix prompt or source image. |
+| **Max Retries** | Specific Page fails validation > configured `max_retries`. | **Dead Letter.** Scanner sees count > limit and skips this page. | **Manual Intervention** required to fix prompt or source image. |
 | **Worker Crash** | Python/Prefect process dies mid-execution. | **State Recovery.** `GEMINI_CURRENT_BATCH_ID` persists in Prefect Cloud/DB. | **Restart Flow.** It checks the variable and resumes polling. |
 
-## 2. Operational Playbook
+## 2. File Upload Retry Handling
+
+When uploading images to the Gemini File API during batch submission:
+
+*   **Retry Strategy**: Exponential backoff starting from configured `upload_retry_backoff_seconds`.
+*   **Maximum Retries**: Configured via `upload_retry_attempts` in config file.
+*   **Re-upload on Retry**: Always re-upload the image file on retry (no need to verify if previously uploaded file still exists or is valid).
+*   **Failure Handling**: If all retry attempts fail, the page is skipped for the current batch cycle. It will be picked up in the next scan cycle.
+
+This approach simplifies file lifecycle management:
+*   No need to track file expiration (files expire after 48 hours).
+*   No need to verify file validity before batch submission.
+*   Each batch submission uses fresh file uploads, ensuring files are valid for the batch job duration.
+
+## 3. Operational Playbook
 
 ### A. How to Resume
 Since the system is a State Machine driven by the `GEMINI_CURRENT_BATCH_ID` Prefect Variable, you do not need to do anything special.
@@ -36,7 +53,7 @@ If `GEMINI_CURRENT_BATCH_ID` is set, but you know the job is dead/irrelevant and
 2.  Delete or clear the value of `GEMINI_CURRENT_BATCH_ID`.
 3.  **Result:** The next Flow run will see `None` and switch to "Scanning Mode" to create a new batch.
 
-## 3. Observability (Prefect UI)
+## 4. Observability (Prefect UI)
 
 We utilize Prefect features to minimize CLI checking.
 
@@ -59,7 +76,7 @@ The current snapshot of the system state is always visible in **Prefect UI -> Va
 *   `GEMINI_CURRENT_BATCH_ID`: Are we waiting on Google?
 *   `RECORD_FAILURE_COUNTS`:Which pages are struggling?
 
-## 4. Maintenance
+## 5. Maintenance
 
 ### Pruning Failure Counts
 Over months, `RECORD_FAILURE_COUNTS` might grow large.

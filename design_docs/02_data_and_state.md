@@ -1,27 +1,18 @@
 # 02. Data Strategy & State Management
 
-## 1. Pydantic Configuration Model
+## 1. Configuration
 
-All logic is driven by a unified configuration object.
+All logic is driven by a unified configuration loaded from a YAML file. See [Configuration](./06_configuration.md) for details on the configuration structure and how it is loaded.
 
-```python
-list[str] = ["Alabama", "California"]
-    target_years: tuple[int, int] = (1849, 1852)from pydantic import BaseModel, DirectoryPath, Field
+The configuration includes:
 
-class GlobalConfig(BaseModel):
-    # Paths
-    label_source_dir: DirectoryPath = Field(..., description="Source of Truth (JSONs)")
-    image_source_dir: DirectoryPath = Field(..., description="Raw Images")
-    output_dir: DirectoryPath = Field(..., description="Where to save success results")
-  
-    # Scope Filters
-    target_states: list[str] = ["Alabama", "California"]
-    target_years: tuple[int, int] = (1849, 1852)
-  
-    # Execution Logic
-    max_retries: int = 3
-    batch_size_limit: int = 100
-```
+* **Paths:** Source directories for labels, images, and output location
+* **Scope Filters:** Target states and year ranges to process
+* **Execution Logic:** Maximum retries, batch size limits
+* **Model Configuration:** Gemini model name and generation parameters
+* **API Settings:** Polling intervals, timeout values
+
+Configuration is validated using Pydantic models at load time, ensuring type safety and proper path validation.
 
 ## 2. Filesystem Layout
 
@@ -72,8 +63,8 @@ At the end of every `Process Results` task, we generate a Markdown Artifact in t
 * **Success:** 95
 * **Failures:** 5
 * **Failed IDs:**
-  * `CA:Lincoln:4` (JSON Decode Error) - *Retry #2*
-  * `NY:Adams:10` (Content Filtered) - *Retry #3 (Maxed)*
+  * `Alabama:Lincoln:4` (JSON Decode Error) - *Retry #2*
+  * `California:Adams:10` (Content Filtered) - *Retry #3 (Maxed)*
 
 ```
 

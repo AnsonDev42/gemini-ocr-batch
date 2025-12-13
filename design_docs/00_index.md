@@ -7,6 +7,8 @@
 | **Scope**            | Offline, large-scale Gemini batch inference |
 | **Storage Strategy** | **Filesystem-Native** (No Database)         |
 
+## For LLMs
+Read design_docs/agents.md for the dev rules
 ## Overview
 
 This system orchestrates the processing of historical course catalogs using Google's Gemini Batch API. It transitions the existing synchronous, single-threaded inference script into a robust, resumable batch processing pipeline.
@@ -29,3 +31,6 @@ This design implements a **"Wave Execution"** strategy:
 3. [Orchestration Logic](./03_orchestration_logic.md) - The "Scanner" and the Prefect flow.
 4. [Domain Integration](./04_domain_integration.md) - Context extraction and prompt management.
 5. [Operations & Recovery](./05_operations.md) - Handling errors and restarts.
+6. [Configuration](./06_configuration.md) - Configuration file structure and environment variables.
+7. [Testing Strategy](./07_testing.md) - Unit tests, integration tests, and test structure.
+8. [Build Plan](./08_build_plan.md) - Implementation order and phase-by-phase build plan.

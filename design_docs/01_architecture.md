@@ -34,10 +34,10 @@ graph TD
 
 | Layer | Component | Responsibility |
 | :--- | :--- | :--- |
-| **Config** | `pydantic_models.py` | Validates paths, school filters, and model parameters. |
+| **Config** | `config.yaml` + `.env` | YAML file for all settings, `.env` for secrets (API keys). Validated via Pydantic models. |
 | **Orchestration** | **Prefect Flow** | Manages the loop. Stores state in Prefect SQLite/Postgres (Variables). |
 | **Workload** | `dataset/label_to_curricular` | The "Allow List". Defines what *should* exist. |
-| **Assets** | `dataset/images` | Read-only image source. |
+| **Assets** | `dataset/raw_image_dataset` | Read-only image source. |
 | **Results** | `dataset/output_results` | The permanent record of successful extractions. |
 | **Observability**| **Prefect UI** | Logs specific Record IDs, Retry counts, and Batch-level success rates. |
 ```
