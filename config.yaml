@@ -1,0 +1,59 @@
+# Paths
+paths:
+  # Source of Truth (JSON allow-list)
+  label_source_dir: "dataset/label_to_curricular"
+  # Raw images (JPGs)
+  image_source_dir: "dataset/raw_image_dataset"
+  # Successful outputs are written here
+  output_dir: "dataset/output_results"
+
+# Optional scope filters
+filters:
+  target_years:
+    start: 1849
+    end: 1852
+
+# Example:
+# filters:
+#   target_states: ["Alabama", "California"]
+#   target_years:
+#     start: 1849
+#     end: 1852
+
+# Execution
+execution:
+  max_retries: 3
+  batch_size_limit: 3
+  dry_run: false
+  max_concurrent_batches: 4
+
+# Gemini model
+model:
+  name: "gemini-2.5-flash"
+  generation_config:
+    temperature: 0.1
+    max_output_tokens: 8192
+    response_mime_type: "application/json"
+
+# Batch API polling
+batch:
+  poll_interval_seconds: 30
+  max_poll_attempts: 3600
+  display_name_prefix: "ocr-batch-job"
+
+# File API uploads
+files:
+  upload_retry_attempts: 3
+  upload_retry_backoff_seconds: 2
+  upload_concurrency: 4
+
+# Prompt template registry
+prompt:
+  registry_dir: "prompts"
+  name: "page_ocr"
+  template_file: "v1.jinja"
+
+# Prefect metadata (informational; flow runs locally too)
+prefect:
+  flow_name: "orchestrate_gemini_batch"
+  schedule_interval_minutes: 10
