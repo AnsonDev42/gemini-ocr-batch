@@ -11,7 +11,7 @@
 | **Batch Job Expired** | Batch job expires before completion. | **Flow Logic.** Logs warning, removes batch ID from `active_batch_ids`, frees inflight records. | None. Next scheduled run will re-submit. |
 | **Validation Error** | Model returns valid JSON, but schema validation fails (e.g., missing fields). | **Partial Failure.** Output NOT written. `RECORD_FAILURE_COUNTS` var incremented. | None. Scanner will re-queue pending retry limit. |
 | **Max Retries** | Specific Page fails validation > configured `max_retries`. | **Dead Letter.** Scanner sees count > limit and skips this page. | **Manual Intervention** required to fix prompt or source image. |
-| **Worker Crash** | Python/Prefect process dies mid-execution. | **State Recovery.** `GEMINI_CURRENT_BATCH_ID` persists in Prefect Cloud/DB. | **Restart Flow.** It checks the variable and resumes polling. |
+| **Worker Crash** | Python/Prefect process dies mid-execution. | **State Recovery.** `active_batch_ids` list persists in Prefect Cloud/DB. | **Restart Flow.** It checks all batches in `active_batch_ids` and resumes polling each one. |
 
 ## 2. File Upload Retry Handling
 

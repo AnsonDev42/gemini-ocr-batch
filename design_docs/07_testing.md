@@ -277,21 +277,21 @@ tests/
     *   Load config, initialize flow
     *   Verify flow is created successfully
 
-*   **Test: Flow with No Active Batch**
-    *   No `GEMINI_CURRENT_BATCH_ID` variable set
+*   **Test: Flow with No Active Batches**
+    *   No batches in `active_batch_ids` list
     *   Mock scanner returns runnable pages
-    *   Verify batch is submitted and variable is set
+    *   Verify batch is submitted and batch ID is added to `active_batch_ids`
 
-*   **Test: Flow with Active Batch**
-    *   `GEMINI_CURRENT_BATCH_ID` variable set
-    *   Mock batch status as processing
-    *   Verify flow exits without submitting new batch
+*   **Test: Flow with Active Batches**
+    *   One or more batch IDs exist in `active_batch_ids` list
+    *   Mock batch statuses as processing
+    *   Verify flow polls existing batches and does not exceed `max_concurrent_batches` limit
 
 *   **Test: Flow Processes Completed Batch**
-    *   `GEMINI_CURRENT_BATCH_ID` variable set
+    *   Batch ID exists in `active_batch_ids` list
     *   Mock batch status as succeeded
     *   Mock results download
-    *   Verify results are processed and variable is cleared
+    *   Verify results are processed and batch ID is removed from `active_batch_ids`
 
 ## Test Fixtures
 

@@ -10,24 +10,38 @@
 
 ## 2. High-Level Diagram
 
-The system runs as a single Prefect Deployment on a scheduled interval (e.g., every 10 minutes).
+The system runs as a single Prefect Deployment on a scheduled interval (e.g., every 10 minutes). It supports multiple concurrent batches tracked via `active_batch_ids` list.
 
 ```mermaid
 graph TD
-    A[Start Prefect Flow] --> B{Check Prefect Variable: <br/>CURRENT_BATCH_ID}
+    A[Start Prefect Flow] --> B[Load active_batch_ids from Prefect Variables]
     
-    B -->|ID Exists| C[Poll Gemini API Status]
-    C -->|Still Running| D[Log Wait & Exit]
-    C -->|Complete| E[Download & Process Results]
-    E -->|Validation Success| F[Write to output_results]
-    E -->|Validation Fail| G[Increment Retry Counter in Prefect]
-    F & G --> H[Clear CURRENT_BATCH_ID]
+    B --> C{Any Active Batches?}
     
-    B -->|ID is Null| I[Scan 'label_to_curricular']
-    I -->|Filter by Config & State| J[Build Dependency DAG]
-    J -->|Exclude 'Done' & 'Max Retries'| K[Identify Runnable Candidates]
-    K -->|Create JSONL Payload| L[Submit to Gemini Batch API]
-    L -->|Save ID to Variable| M[End Flow]
+    C -->|Yes| D[Loop Through Each Batch ID]
+    D --> E[Poll Gemini API Status]
+    E -->|Still Running| F[Log Status & Continue]
+    E -->|Complete| G[Download & Process Results]
+    G -->|Validation Success| H[Write to output_results]
+    G -->|Validation Fail| I[Increment Retry Counter in Prefect]
+    H & I --> J[Remove Batch from active_batch_ids]
+    
+    C -->|No| K[Check Available Slots]
+    D --> K
+    F --> K
+    J --> K
+    
+    K --> L{Slots Available?}
+    L -->|Yes| M[Scan 'label_to_curricular']
+    L -->|No| N[Sleep & Wait for Next Poll]
+    N --> C
+    
+    M -->|Filter by Config & State| O[Build Dependency DAG]
+    O -->|Exclude 'Done' & 'Max Retries'| P[Identify Runnable Candidates]
+    P -->|Create JSONL Payload| Q[Submit to Gemini Batch API]
+    Q -->|Add Batch ID to active_batch_ids| K
+    
+    K -->|No Work & No Active Batches| R[End Flow]
 ```
 
 ## 3. System Layers
