@@ -4,9 +4,9 @@
 
 1.  **Source of Truth = Filesystem (Input):** The workload is defined strictly by the existence of JSON files in `dataset/label_to_curricular`.
 2.  **Definition of Done = Filesystem (Output):** A page is considered "Done" **only** if a valid JSON file exists in `dataset/output_results`.
-3.  **State Management = Prefect Backend:** We use **Prefect Variables** to track "In-Flight" Batch IDs and "Retry Counts." We do not write metadata files to disk.
-4.  **Idempotency & Resiliency:** The flow is designed to be interrupted at any moment. Upon restart, it queries Prefect Variables to resume the state (e.g., check the status of a remote Gemini batch) rather than starting over.
-5.  **Natural Retry Loop:** If a record fails validation, we do not save the output. The next "Scan" phase naturally detects it as "Pending" and queues it again, subject to a Max Retry limit stored in Prefect.
+3.  **State Management = SQLite Database:** We use a dedicated **SQLite database** (`data/gemini_batches.db`) to track "In-Flight" Batch IDs, "Retry Counts," and comprehensive failure logs. This provides scalable state management without relying on Prefect Variables.
+4.  **Idempotency & Resiliency:** The flow is designed to be interrupted at any moment. Upon restart, it queries the SQLite database to resume the state (e.g., check the status of a remote Gemini batch) rather than starting over.
+5.  **Natural Retry Loop:** If a record fails validation, we do not save the output. The next "Scan" phase naturally detects it as "Pending" and queues it again, subject to a Max Retry limit stored in the database.
 
 ## 2. High-Level Diagram
 
@@ -14,7 +14,7 @@ The system runs as a single Prefect Deployment on a scheduled interval (e.g., ev
 
 ```mermaid
 graph TD
-    A[Start Prefect Flow] --> B[Load active_batch_ids from Prefect Variables]
+    A[Start Prefect Flow] --> B[Load active_batch_ids from SQLite Database]
     
     B --> C{Any Active Batches?}
     
@@ -23,7 +23,7 @@ graph TD
     E -->|Still Running| F[Log Status & Continue]
     E -->|Complete| G[Download & Process Results]
     G -->|Validation Success| H[Write to output_results]
-    G -->|Validation Fail| I[Increment Retry Counter in Prefect]
+    G -->|Validation Fail| I[Increment Retry Counter in Database]
     H & I --> J[Remove Batch from active_batch_ids]
     
     C -->|No| K[Check Available Slots]
@@ -46,12 +46,12 @@ graph TD
 
 ## 3. System Layers
 
-| Layer | Component | Responsibility |
-| :--- | :--- | :--- |
+| Layer | Component | Responsibility                                                                            |
+| :--- | :--- |:------------------------------------------------------------------------------------------|
 | **Config** | `config.yaml` + `.env` | YAML file for all settings, `.env` for secrets (API keys). Validated via Pydantic models. |
-| **Orchestration** | **Prefect Flow** | Manages the loop. Stores state in Prefect SQLite/Postgres (Variables). |
-| **Workload** | `dataset/label_to_curricular` | The "Allow List". Defines what *should* exist. |
-| **Assets** | `dataset/raw_image_dataset` | Read-only image source. |
-| **Results** | `dataset/output_results` | The permanent record of successful extractions. |
-| **Observability**| **Prefect UI** | Logs specific Record IDs, Retry counts, and Batch-level success rates. |
+| **Orchestration** | **Prefect Flow** | Manages the loop. Stores state in dedicated SQLite database (`data/gemini_batches.db`).   |
+| **Workload** | `dataset/label_to_curricular` | The "Allow List". Defines what *should* exist.                                            |
+| **Assets** | `dataset/raw_image_dataset` | Read-only image source.                                                                   |
+| **Results** | `dataset/output_results` | The permanent record of successful extractions.                                           |
+| **Observability**| **Prefect UI** | Logs specific Record IDs, Retry counts, and Batch-level success rates.                    |
 ```

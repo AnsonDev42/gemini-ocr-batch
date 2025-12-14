@@ -9,6 +9,7 @@ paths:
 
 # Optional scope filters
 filters:
+  target_states: ["Alabama"]
   target_years:
     start: 1849
     end: 1852
@@ -23,9 +24,9 @@ filters:
 # Execution
 execution:
   max_retries: 3
-  batch_size_limit: 3
+  batch_size_limit: 2
   dry_run: false
-  max_concurrent_batches: 4
+  max_concurrent_batches: 10
 
 # Gemini model
 model:
@@ -37,7 +38,7 @@ model:
 
 # Batch API polling
 batch:
-  poll_interval_seconds: 30
+  poll_interval_seconds: 20
   max_poll_attempts: 3600
   display_name_prefix: "ocr-batch-job"
 

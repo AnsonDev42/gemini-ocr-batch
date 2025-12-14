@@ -26,7 +26,7 @@ from .file_api import (
 )
 from .gemini_client import create_gemini_client
 from .models import PageId, format_previous_context
-from .prefect_state import PrefectVariableStateStore, StateStore
+from .prefect_state import SQLiteStateStore
 from .prompting import load_prompt_template
 from .results import process_results_jsonl
 from .scanner import scan_runnable_pages
@@ -98,7 +98,7 @@ def task_process_batch_results(
     *,
     config: AppConfig,
     batch_id: str,
-    store: StateStore,
+    store: SQLiteStateStore,
     result_file_name: str,
     output_dir: Path,
 ) -> dict[str, Any]:
@@ -115,6 +115,31 @@ def task_process_batch_results(
     updated_failure_counts = (
         store.increment_failure_counts(failures) if failures else initial_failure_counts
     )
+
+    # Log detailed failure information to database
+    for outcome in outcomes:
+        if not outcome.success:
+            attempt_number = initial_failure_counts.get(outcome.key, 0) + 1
+            try:
+                store.log_failure(
+                    record_key=outcome.key,
+                    batch_id=batch_id,
+                    attempt_number=attempt_number,
+                    error_type=outcome.error_type,
+                    error_message=outcome.error,
+                    error_traceback=outcome.error_traceback,
+                    raw_response_text=outcome.raw_response_text,
+                    extracted_text=outcome.extracted_text,
+                    raw_response_json=outcome.raw_response_json,
+                    model_name=config.model.name,
+                    prompt_name=config.prompt.name,
+                    prompt_template=config.prompt.template_file,
+                    generation_config=generation_config,
+                )
+            except Exception as exc:  # noqa: BLE001 - don't fail the task if logging fails
+                logger.warning(
+                    "Failed to log failure for record %s: %s", outcome.key, exc
+                )
 
     store.remove_batch(batch_id)
 
@@ -220,7 +245,7 @@ def task_process_batch_results(
 
 
 @task(cache_policy=NO_CACHE, persist_result=False)
-def task_scan_for_work(config: AppConfig, store: StateStore) -> list[PageId]:
+def task_scan_for_work(config: AppConfig, store: SQLiteStateStore) -> list[PageId]:
     logger = get_run_logger()
     failure_counts = store.get_failure_counts()
     inflight_records = store.get_inflight_records()
@@ -398,7 +423,7 @@ def task_wait_for_batch_completion(
 @flow(name="orchestrate_gemini_batch")
 def orchestrate_gemini_batch(*, config: AppConfig) -> None:
     logger = get_run_logger()
-    store = PrefectVariableStateStore()
+    store = SQLiteStateStore()
 
     while True:
         made_progress = False

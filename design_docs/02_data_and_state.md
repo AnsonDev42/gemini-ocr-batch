@@ -25,33 +25,96 @@ The scanner iterates **only** this directory structure.
 
 `dataset/output_results/{state}/{school}/{year}/{page_num}.json`
 
-## 3. Prefect Internal State (The Queue)
+## 3. SQLite Database State Management
 
-Instead of a local `metadata.json`, we use **Prefect Variables**.
+State is managed using a dedicated SQLite database located at `data/gemini_batches.db`. This provides scalable storage for batch tracking, failure counts, and comprehensive failure logging.
 
-### Variable A: `active_batch_ids`
+### Database Location and Initialization
 
-* **Type:** List[string]
-* **Purpose:** Track all in-flight batch IDs (supports multiple concurrent batches).
-* **Logic:** Append on submission; remove when a batch reaches a terminal state.
+* **Path:** `data/gemini_batches.db`
+* **Initialization:** Database schema is automatically created on first use
+* **Connection:** Uses SQLAlchemy with connection pooling for efficient access
 
-### Variable B: `batch_record_keys`
+### State Management Tables
 
-* **Type:** Dict[batch_id, List[string]]
-* **Purpose:** Map batch IDs to their record keys so we can clear inflight records when a batch completes or fails.
+#### Table A: `active_batches`
 
-### Variable C: `inflight_record_ids`
+* **Purpose:** Track all in-flight batch IDs (supports multiple concurrent batches)
+* **Schema:**
+  * `batch_id` (TEXT PRIMARY KEY)
+  * `created_at` (TIMESTAMP)
+  * `updated_at` (TIMESTAMP)
+  * `status` (TEXT) - 'active', 'completed', 'failed'
+* **Logic:** Insert on submission; update status to 'completed' when batch reaches terminal state
+* **Indexes:** `created_at`, `status`
 
-* **Type:** List[string]
-* **Purpose:** Record keys that are already scheduled in an active batch. The scanner skips these to avoid double-sending while a batch is pending.
+#### Table B: `batch_record_keys`
 
-### Variable D: `record_failure_counts`
+* **Purpose:** Map batch IDs to their record keys so we can clear inflight records when a batch completes or fails
+* **Schema:**
+  * `batch_id` (TEXT)
+  * `record_key` (TEXT)
+  * `created_at` (TIMESTAMP)
+  * PRIMARY KEY (`batch_id`, `record_key`)
+* **Indexes:** `batch_id`, `record_key`
 
-* **Type:** JSON Dictionary
-* **Purpose:** Tracks how many times a specific page has failed.
+#### Table C: `inflight_records`
+
+* **Purpose:** Record keys that are already scheduled in an active batch. The scanner skips these to avoid double-sending while a batch is pending
+* **Schema:**
+  * `record_key` (TEXT PRIMARY KEY)
+  * `batch_id` (TEXT)
+  * `created_at` (TIMESTAMP)
+* **Indexes:** `batch_id`, `record_key`
+
+#### Table D: `failure_counts`
+
+* **Purpose:** Tracks how many times a specific page has failed
+* **Schema:**
+  * `record_key` (TEXT PRIMARY KEY)
+  * `count` (INTEGER DEFAULT 0)
+  * `last_updated` (TIMESTAMP)
 * **Logic:**
-  * Incremented when a record returns 400/500 from Gemini OR fails Pydantic validation after parsing.
-  * If `count > max_retries`, the Scanner ignores this ID (Dead Letter logic).
+  * Incremented when a record returns 400/500 from Gemini OR fails Pydantic validation after parsing
+  * If `count > max_retries`, the Scanner ignores this ID (Dead Letter logic)
+* **Index:** `record_key`
+
+### Failure Logging Table
+
+#### Table E: `failure_logs`
+
+* **Purpose:** Comprehensive logging of all failures with full context for debugging and analysis
+* **Schema:**
+  * `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
+  * `record_key` (TEXT NOT NULL)
+  * `batch_id` (TEXT NOT NULL)
+  * `attempt_number` (INTEGER NOT NULL)
+  * `error_type` (TEXT) - 'JSONDecodeError', 'ValidationError', 'ValueError', 'MissingResponse', etc.
+  * `error_message` (TEXT)
+  * `error_traceback` (TEXT) - Full traceback for debugging
+  * `raw_response_text` (TEXT) - Full LLM response text extracted from candidates
+  * `extracted_text` (TEXT) - Text after extraction but before JSON parsing
+  * `raw_response_json` (TEXT) - JSON string of full response dict (for context)
+  * `model_name` (TEXT)
+  * `prompt_name` (TEXT)
+  * `prompt_template` (TEXT)
+  * `generation_config` (TEXT) - JSON string
+  * `created_at` (TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
+* **Indexes:** `record_key`, `batch_id`, `created_at`, `error_type`
+* **Use Cases:**
+  * Analyze JSON parsing failures offline without re-running batches
+  * Identify patterns in LLM response formats that cause parsing issues
+  * Debug validation errors with full context of what the model returned
+  * Track failure trends over time by error type
+
+### State Store Implementation
+
+The `SQLiteStateStore` class implements the `StateStore` protocol and provides:
+
+* **Scalability:** Handles millions of records efficiently with proper indexing
+* **Atomic Operations:** All state changes are transactional
+* **Concurrent Access:** SQLite supports concurrent reads and serialized writes
+* **Failure Logging:** Integrated failure logging with full context capture
 
 ## 4. Observability (Prefect Artifacts)
 

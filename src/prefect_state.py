@@ -1,121 +1,274 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Protocol
+from datetime import datetime
+from typing import Any
 
-from prefect.variables import Variable
+from sqlalchemy import text
 
-ACTIVE_BATCHES_VAR = "active_batch_ids"
-BATCH_RECORD_KEYS_VAR = "batch_record_keys"
-FAILURE_COUNTS_VAR = "record_failure_counts"
-INFLIGHT_RECORD_IDS_VAR = "inflight_record_ids"
-
-
-class StateStore(Protocol):
-    def get_active_batches(self) -> list[str]: ...
-
-    def add_batch(self, batch_id: str, record_keys: list[str]) -> None: ...
-
-    def remove_batch(self, batch_id: str) -> list[str]: ...
-
-    def get_batch_record_keys(self, batch_id: str) -> list[str]: ...
-
-    def get_failure_counts(self) -> dict[str, int]: ...
-
-    def increment_failure_counts(self, failures: dict[str, str]) -> dict[str, int]: ...
-
-    def get_inflight_records(self) -> set[str]: ...
-
-    def add_inflight_records(self, record_keys: list[str]) -> None: ...
-
-    def remove_inflight_records(self, record_keys: list[str]) -> None: ...
+from .database import (
+    FailureLog,
+    get_session,
+    init_database,
+)
 
 
 @dataclass
-class PrefectVariableStateStore:
-    active_batches_var: str = ACTIVE_BATCHES_VAR
-    batch_record_keys_var: str = BATCH_RECORD_KEYS_VAR
-    failure_counts_var: str = FAILURE_COUNTS_VAR
-    inflight_records_var: str = INFLIGHT_RECORD_IDS_VAR
+class SQLiteStateStore:
+    """State store using SQLite database for scalable state management."""
 
-    def _get_list(self, var: str) -> list[str]:
-        raw = Variable.get(var, default=[])
-        if not isinstance(raw, list):
-            return []
-        return [str(x) for x in raw]
-
-    def _get_dict(self, var: str) -> dict:
-        raw = Variable.get(var, default={})
-        if not isinstance(raw, dict):
-            return {}
-        return dict(raw)
+    def __post_init__(self) -> None:
+        """Initialize database schema on first use."""
+        init_database()
 
     def get_active_batches(self) -> list[str]:
-        return self._get_list(self.active_batches_var)
+        """Get list of active batch IDs."""
+        with get_session() as session:
+            result = session.execute(
+                text("SELECT batch_id FROM active_batches WHERE status = 'active'")
+            )
+            return [row[0] for row in result]
 
     def add_batch(self, batch_id: str, record_keys: list[str]) -> None:
-        active = self.get_active_batches()
-        if batch_id not in active:
-            active.append(batch_id)
-        Variable.set(self.active_batches_var, active, overwrite=True)
+        """Add a new batch and its record keys."""
+        now = datetime.utcnow()
+        with get_session() as session:
+            # Insert or update active batch
+            session.execute(
+                text("""
+                    INSERT INTO active_batches (batch_id, created_at, updated_at, status)
+                    VALUES (:batch_id, :created_at, :updated_at, 'active')
+                    ON CONFLICT(batch_id) DO UPDATE SET
+                        status = 'active',
+                        updated_at = :updated_at
+                """),
+                {"batch_id": batch_id, "created_at": now, "updated_at": now},
+            )
 
-        mapping = self._get_dict(self.batch_record_keys_var)
-        mapping[batch_id] = list(record_keys)
-        Variable.set(self.batch_record_keys_var, mapping, overwrite=True)
+            # Get old record keys before deletion (to remove from inflight records)
+            old_keys_result = session.execute(
+                text(
+                    "SELECT record_key FROM batch_record_keys WHERE batch_id = :batch_id"
+                ),
+                {"batch_id": batch_id},
+            )
+            old_keys = {row[0] for row in old_keys_result}
+            new_keys_set = set(record_keys)
+            keys_to_remove = old_keys - new_keys_set
 
-        self.add_inflight_records(record_keys)
+            # Delete old batch record keys (to replace with new ones, consistent with InMemoryStateStore)
+            session.execute(
+                text("DELETE FROM batch_record_keys WHERE batch_id = :batch_id"),
+                {"batch_id": batch_id},
+            )
+
+            # Insert batch record keys
+            for record_key in record_keys:
+                session.execute(
+                    text("""
+                        INSERT INTO batch_record_keys (batch_id, record_key, created_at)
+                        VALUES (:batch_id, :record_key, :created_at)
+                    """),
+                    {"batch_id": batch_id, "record_key": record_key, "created_at": now},
+                )
+
+            # Remove old inflight records that are no longer in this batch
+            if keys_to_remove:
+                placeholders = ",".join(
+                    [f":key{i}" for i in range(len(keys_to_remove))]
+                )
+                params = {f"key{i}": key for i, key in enumerate(keys_to_remove)}
+                params["batch_id"] = batch_id
+                session.execute(
+                    text(f"""
+                        DELETE FROM inflight_records 
+                        WHERE record_key IN ({placeholders}) AND batch_id = :batch_id
+                    """),
+                    params,
+                )
+
+            # Add to inflight records with batch_id
+            for record_key in record_keys:
+                session.execute(
+                    text("""
+                        INSERT INTO inflight_records (record_key, batch_id, created_at)
+                        VALUES (:record_key, :batch_id, :created_at)
+                        ON CONFLICT(record_key) DO UPDATE SET batch_id = :batch_id
+                    """),
+                    {"record_key": record_key, "batch_id": batch_id, "created_at": now},
+                )
+
+            session.commit()
 
     def remove_batch(self, batch_id: str) -> list[str]:
-        active = self.get_active_batches()
-        if batch_id in active:
-            active.remove(batch_id)
-            Variable.set(self.active_batches_var, active, overwrite=True)
+        """Remove a batch and return its record keys."""
+        with get_session() as session:
+            # Get record keys before deletion
+            result = session.execute(
+                text(
+                    "SELECT record_key FROM batch_record_keys WHERE batch_id = :batch_id"
+                ),
+                {"batch_id": batch_id},
+            )
+            record_keys = [row[0] for row in result]
 
-        mapping = self._get_dict(self.batch_record_keys_var)
-        record_keys = mapping.pop(batch_id, [])
-        Variable.set(self.batch_record_keys_var, mapping, overwrite=True)
+            # Update batch status
+            session.execute(
+                text("""
+                    UPDATE active_batches
+                    SET status = 'completed', updated_at = :updated_at
+                    WHERE batch_id = :batch_id
+                """),
+                {"batch_id": batch_id, "updated_at": datetime.utcnow()},
+            )
 
-        if record_keys:
-            self.remove_inflight_records(record_keys)
+            # Delete batch record keys
+            session.execute(
+                text("DELETE FROM batch_record_keys WHERE batch_id = :batch_id"),
+                {"batch_id": batch_id},
+            )
 
-        return [str(k) for k in record_keys]
+            # Remove from inflight records (inline to avoid nested session)
+            if record_keys:
+                placeholders = ",".join([f":key{i}" for i in range(len(record_keys))])
+                params = {f"key{i}": key for i, key in enumerate(record_keys)}
+                session.execute(
+                    text(
+                        f"DELETE FROM inflight_records WHERE record_key IN ({placeholders})"
+                    ),
+                    params,
+                )
+
+            session.commit()
+            return record_keys
 
     def get_batch_record_keys(self, batch_id: str) -> list[str]:
-        mapping = self._get_dict(self.batch_record_keys_var)
-        keys = mapping.get(batch_id, [])
-        return [str(k) for k in keys]
+        """Get record keys for a specific batch."""
+        with get_session() as session:
+            result = session.execute(
+                text(
+                    "SELECT record_key FROM batch_record_keys WHERE batch_id = :batch_id"
+                ),
+                {"batch_id": batch_id},
+            )
+            return [row[0] for row in result]
 
     def get_failure_counts(self) -> dict[str, int]:
-        raw = Variable.get(self.failure_counts_var, default={})
-        if not isinstance(raw, dict):
-            return {}
-        counts: dict[str, int] = {}
-        for key, value in raw.items():
-            try:
-                counts[str(key)] = int(value)
-            except (TypeError, ValueError):
-                continue
-        return counts
+        """Get failure counts for all records."""
+        with get_session() as session:
+            result = session.execute(
+                text("SELECT record_key, count FROM failure_counts")
+            )
+            return {row[0]: row[1] for row in result}
 
     def increment_failure_counts(self, failures: dict[str, str]) -> dict[str, int]:
-        counts = self.get_failure_counts()
-        for key in failures:
-            counts[key] = counts.get(key, 0) + 1
-        Variable.set(self.failure_counts_var, counts, overwrite=True)
-        return counts
+        """Increment failure counts for given record keys."""
+        now = datetime.utcnow()
+        with get_session() as session:
+            for record_key in failures:
+                session.execute(
+                    text("""
+                        INSERT INTO failure_counts (record_key, count, last_updated)
+                        VALUES (:record_key, 1, :last_updated)
+                        ON CONFLICT(record_key) DO UPDATE SET
+                            count = failure_counts.count + 1,
+                            last_updated = :last_updated
+                    """),
+                    {"record_key": record_key, "last_updated": now},
+                )
+
+            # Return all failure counts (consistent with InMemoryStateStore)
+            result = session.execute(
+                text("SELECT record_key, count FROM failure_counts")
+            )
+            updated_counts = {row[0]: row[1] for row in result}
+
+            session.commit()
+            return updated_counts
 
     def get_inflight_records(self) -> set[str]:
-        return set(self._get_list(self.inflight_records_var))
+        """Get set of all inflight record keys."""
+        with get_session() as session:
+            result = session.execute(text("SELECT record_key FROM inflight_records"))
+            return {row[0] for row in result}
 
     def add_inflight_records(self, record_keys: list[str]) -> None:
-        inflight = self.get_inflight_records()
-        inflight.update(record_keys)
-        Variable.set(self.inflight_records_var, list(inflight), overwrite=True)
+        """Add record keys to inflight records.
+
+        Note: This method is called from add_batch which already handles
+        inflight records with batch_id. This method is kept for protocol
+        compatibility but should not be called directly with batch context.
+        """
+        if not record_keys:
+            return
+        now = datetime.utcnow()
+        with get_session() as session:
+            for record_key in record_keys:
+                session.execute(
+                    text("""
+                        INSERT INTO inflight_records (record_key, batch_id, created_at)
+                        VALUES (:record_key, :batch_id, :created_at)
+                        ON CONFLICT(record_key) DO UPDATE SET batch_id = :batch_id
+                    """),
+                    {"record_key": record_key, "batch_id": "", "created_at": now},
+                )
+            session.commit()
 
     def remove_inflight_records(self, record_keys: list[str]) -> None:
-        inflight = self.get_inflight_records()
-        inflight.difference_update(record_keys)
-        Variable.set(self.inflight_records_var, list(inflight), overwrite=True)
+        """Remove record keys from inflight records."""
+        if not record_keys:
+            return
+        with get_session() as session:
+            # SQLite requires using placeholders for IN clause
+            placeholders = ",".join([f":key{i}" for i in range(len(record_keys))])
+            params = {f"key{i}": key for i, key in enumerate(record_keys)}
+            session.execute(
+                text(
+                    f"DELETE FROM inflight_records WHERE record_key IN ({placeholders})"
+                ),
+                params,
+            )
+            session.commit()
+
+    def log_failure(
+        self,
+        *,
+        record_key: str,
+        batch_id: str,
+        attempt_number: int,
+        error_type: str | None,
+        error_message: str | None,
+        error_traceback: str | None,
+        raw_response_text: str | None,
+        extracted_text: str | None,
+        raw_response_json: str | None,
+        model_name: str | None,
+        prompt_name: str | None,
+        prompt_template: str | None,
+        generation_config: dict[str, Any] | None,
+    ) -> None:
+        """Log a failure with full context."""
+        with get_session() as session:
+            failure_log = FailureLog(
+                record_key=record_key,
+                batch_id=batch_id,
+                attempt_number=attempt_number,
+                error_type=error_type,
+                error_message=error_message,
+                error_traceback=error_traceback,
+                raw_response_text=raw_response_text,
+                extracted_text=extracted_text,
+                raw_response_json=raw_response_json,
+                model_name=model_name,
+                prompt_name=prompt_name,
+                prompt_template=prompt_template,
+                generation_config=json.dumps(generation_config)
+                if generation_config
+                else None,
+            )
+            session.add(failure_log)
+            session.commit()
 
 
 @dataclass

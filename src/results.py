@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ class RecordOutcome:
     success: bool
     error: str | None
     output_path: Path | None
+    error_type: str | None = None
+    raw_response_text: str | None = None
+    extracted_text: str | None = None
+    raw_response_json: str | None = None
+    error_traceback: str | None = None
 
 
 def extract_text_from_response(response: dict[str, Any]) -> str:
@@ -80,6 +86,8 @@ def process_results_jsonl(
                     success=False,
                     error=f"Invalid JSON on line {idx}: {exc}",
                     output_path=None,
+                    error_type="JSONDecodeError",
+                    error_traceback=traceback.format_exc(),
                 )
             )
             continue
@@ -92,6 +100,7 @@ def process_results_jsonl(
                     success=False,
                     error="Missing or invalid record key",
                     output_path=None,
+                    error_type="ValueError",
                 )
             )
             continue
@@ -103,6 +112,8 @@ def process_results_jsonl(
                     success=False,
                     error=str(record.get("error")),
                     output_path=None,
+                    error_type="APIError",
+                    raw_response_json=json.dumps(record, ensure_ascii=False),
                 )
             )
             continue
@@ -111,14 +122,22 @@ def process_results_jsonl(
         if not isinstance(response, dict):
             outcomes.append(
                 RecordOutcome(
-                    key=key, success=False, error="Missing response", output_path=None
+                    key=key,
+                    success=False,
+                    error="Missing response",
+                    output_path=None,
+                    error_type="MissingResponse",
+                    raw_response_json=json.dumps(record, ensure_ascii=False),
                 )
             )
             continue
 
+        # Store raw response JSON for failure analysis
+        raw_response_json = json.dumps(response, ensure_ascii=False)
+
         try:
-            text = extract_text_from_response(response)
-            payload = parse_json_from_text(text)
+            extracted_text = extract_text_from_response(response)
+            payload = parse_json_from_text(extracted_text)
             validated = OcrPageResult.model_validate(payload)
             page_id = PageId.from_key(key)
             out_path = page_id.output_path(output_dir)
@@ -134,9 +153,63 @@ def process_results_jsonl(
                 RecordOutcome(key=key, success=True, error=None, output_path=out_path)
             )
             successes[key] = validated
-        except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        except ValueError as exc:
+            # ValueError from extract_text_from_response or parse_json_from_text
+            error_type = type(exc).__name__
             outcomes.append(
-                RecordOutcome(key=key, success=False, error=str(exc), output_path=None)
+                RecordOutcome(
+                    key=key,
+                    success=False,
+                    error=str(exc),
+                    output_path=None,
+                    error_type=error_type,
+                    raw_response_text=None,  # Failed before extraction
+                    extracted_text=None,
+                    raw_response_json=raw_response_json,
+                    error_traceback=traceback.format_exc(),
+                )
+            )
+        except json.JSONDecodeError as exc:
+            # JSONDecodeError from parse_json_from_text
+            try:
+                extracted_text = extract_text_from_response(response)
+            except Exception:
+                extracted_text = None
+
+            outcomes.append(
+                RecordOutcome(
+                    key=key,
+                    success=False,
+                    error=str(exc),
+                    output_path=None,
+                    error_type="JSONDecodeError",
+                    raw_response_text=extracted_text,
+                    extracted_text=extracted_text,
+                    raw_response_json=raw_response_json,
+                    error_traceback=traceback.format_exc(),
+                )
+            )
+        except ValidationError as exc:
+            # ValidationError from model_validate
+            try:
+                extracted_text = extract_text_from_response(response)
+                payload = parse_json_from_text(extracted_text)
+            except Exception:
+                extracted_text = None
+                payload = None
+
+            outcomes.append(
+                RecordOutcome(
+                    key=key,
+                    success=False,
+                    error=str(exc),
+                    output_path=None,
+                    error_type="ValidationError",
+                    raw_response_text=extracted_text,
+                    extracted_text=extracted_text,
+                    raw_response_json=raw_response_json,
+                    error_traceback=traceback.format_exc(),
+                )
             )
 
     return outcomes, successes

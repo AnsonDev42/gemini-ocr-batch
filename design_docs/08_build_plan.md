@@ -200,8 +200,9 @@ This document outlines the recommended order for building the system components.
    *   Handle write failures
 
 4. **Failure Tracking**
-   *   Update `record_failure_counts` Prefect Variable
+   *   Update `failure_counts` table in SQLite database
    *   Increment failure counts
+   *   Log detailed failure information to `failure_logs` table
    *   Identify dead letters (max retries exceeded)
 
 **Why Fifth**: Results need to be processed after batch completion. This completes the processing pipeline.
@@ -235,12 +236,13 @@ This document outlines the recommended order for building the system components.
    *   State machine logic with multiple concurrent batches (poll/process existing, then submit new if slots available)
    *   Task definitions for each phase
 
-2. **Prefect Variable Integration**
-   *   Read/write `active_batch_ids`
-   *   Read/write `batch_record_keys`
-   *   Read/write `inflight_record_ids`
-   *   Read/write `record_failure_counts`
-   *   Handle variable initialization
+2. **SQLite Database Integration**
+   *   Read/write `active_batches` table
+   *   Read/write `batch_record_keys` table
+   *   Read/write `inflight_records` table
+   *   Read/write `failure_counts` table
+   *   Log failures to `failure_logs` table
+   *   Handle database initialization
 
 3. **Flow Scheduling**
    *   Configure flow schedule (e.g., every 10 minutes)
@@ -257,7 +259,7 @@ This document outlines the recommended order for building the system components.
 
 *   Test flow initialization
 *   Test state machine logic (mocked components)
-*   Test Prefect Variable operations
+*   Test SQLite database operations
 *   Test error handling
 
 **Integration Tests**:
@@ -269,7 +271,7 @@ This document outlines the recommended order for building the system components.
 
 *   Flow executes correctly end-to-end
 *   State machine logic works correctly
-*   Prefect Variables are managed correctly
+*   SQLite database state is managed correctly
 *   Logging and artifacts work
 *   All tests pass
 
@@ -324,7 +326,7 @@ This document outlines the recommended order for building the system components.
 - [ ] Create filesystem scanner
 - [ ] Implement dependency resolution logic
 - [ ] Implement filtering by state/year
-- [ ] Integrate with Prefect Variables (mocked)
+- [ ] Integrate with SQLite database
 - [ ] Write unit tests for all components
 - [ ] Test with real dataset structure
 
@@ -366,7 +368,7 @@ This document outlines the recommended order for building the system components.
 ### Phase 6: Prefect Flow Orchestration
 - [ ] Create Prefect flow structure
 - [ ] Implement state machine logic
-- [ ] Integrate Prefect Variables
+- [ ] Integrate SQLite database state store
 - [ ] Configure flow scheduling
 - [ ] Implement logging and artifacts
 - [ ] Write unit tests
