@@ -49,7 +49,6 @@ class TextBlock(BaseModel):
     position: str
     text: str
     font_style: str
-    text_alignment: str
 
 
 class RawOcr(BaseModel):

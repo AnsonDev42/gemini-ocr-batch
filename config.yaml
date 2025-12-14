@@ -51,7 +51,7 @@ files:
 prompt:
   registry_dir: "prompts"
   name: "page_ocr"
-  template_file: "v1.jinja"
+  template_file: "v1.1.jinja"
 
 # Prefect metadata (informational; flow runs locally too)
 prefect:

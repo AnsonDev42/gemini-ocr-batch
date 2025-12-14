@@ -71,8 +71,8 @@ class FilesConfig(BaseModel):
 
 class PromptConfig(BaseModel):
     registry_dir: Path = Path("prompts")
-    name: str = "page_ocr"
-    template_file: str = "v1.jinja"
+    name: str
+    template_file: str
 
 
 class PrefectConfig(BaseModel):
