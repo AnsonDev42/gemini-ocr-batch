@@ -13,26 +13,21 @@ This flow is designed to be run frequently (e.g., every 5-10 minutes). It is a *
     *   `inflight_record_ids` (set of record keys already scheduled)
     *   `record_failure_counts`
 
-### Step 2: Service Active Batches
-For each `active_batch_id`:
-1.  **Task: `wait_for_batch_completion`**
-    *   Poll Gemini Batch API until a terminal state or timeout.
-    *   Accepts and handles states including `JOB_STATE_PARTIALLY_SUCCEEDED`.
-2.  **Task: `process_batch_results` (when terminal success/partial)**
-    *   Download the results JSONL file from Gemini File API.
-    *   Parse the JSONL file line by line:
-        *   Each line contains a JSON object with a `key` (matching the request key) and either a `response` (success) or `error` (failure).
-        *   Extract the text content from successful responses.
-        *   **Validation:** Parse output against Pydantic Schema.
-        *   **On Success:** Write JSON to `output_results_dir`. Log Info.
-        *   **On Failure:** Increment `record_failure_counts` and skip writing (so it re-queues on the next scan).
-    *   **Cleanup:** Remove the batch ID from `active_batch_ids`, delete its entry in `batch_record_keys`, and remove its record keys from `inflight_record_ids`.
-3.  **If terminal failure/cancel/expire:** Remove the batch ID and inflight record keys so the scanner can re-queue them.
-4.  **If still running/pending after timeout:** Leave the batch ID in `active_batch_ids` (will be picked up next run).
+### Step 2: Service Active Batches (poll + refill loop)
+*   The flow loops until there are no active batches and no runnable work.
+*   For each `active_batch_id`:
+    1.  **Task: `wait_for_batch_completion`**
+        *   Poll Gemini Batch API until a terminal state or timeout (includes `JOB_STATE_PARTIALLY_SUCCEEDED`).
+    2.  **Task: `process_batch_results` (when terminal success/partial)**
+        *   Download results JSONL, validate each record, write successes to `output_results_dir`.
+        *   Increment `record_failure_counts` on failures.
+        *   Cleanup: remove batch from `active_batch_ids`, drop its `batch_record_keys`, and free its `inflight_record_ids`.
+    3.  **If terminal failure/cancel/expire:** remove the batch ID and inflight record keys so the scanner can re-queue.
+    4.  **If still running/pending after timeout:** leave the batch in `active_batch_ids`; it will be re-polled in the next loop iteration.
 
-### Step 3: Submit New Batches (Fill Available Slots)
-1.  Determine available slots: `max_concurrent_batches - len(active_batch_ids)`.
-2.  Loop while slots remain:
+### Step 3: Submit New Batches (keep slots full)
+*   After servicing active batches, the flow attempts to fill available slots up to `max_concurrent_batches`.
+*   Loop while slots remain:
     *   **Task: `scan_and_build_dag`**
         *   Input: configuration paths, `output_results_dir`, `record_failure_counts`, and `inflight_record_ids`.
         *   Logic:
@@ -50,7 +45,7 @@ For each `active_batch_id`:
         *   Upload JSONL, create a Gemini Batch job.
         *   Return `{batch_id, record_keys}`.
     *   Add the new batch ID to `active_batch_ids`, map `batch_record_keys[batch_id] = record_keys`, and add `record_keys` to `inflight_record_ids`.
-    *   Decrement available slots and repeat.
+* If batches are still running but no progress was made in this pass, the flow sleeps for `batch.poll_interval_seconds` and continues polling/submitting in-process; it exits only when no active batches remain and no runnable work is found.
 
 ## 2. Retry Logic & Error Handling
 
