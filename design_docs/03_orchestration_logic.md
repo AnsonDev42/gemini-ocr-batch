@@ -2,90 +2,55 @@
 
 ## 1. The Prefect Flow: `orchestrate_gemini_batch`
 
-This flow is designed to be run frequently (e.g., every 5-10 minutes). It is a **State Machine**.
+This flow is designed to be run frequently (e.g., every 5-10 minutes). It is a **State Machine** and supports multiple concurrent batches.
 
-### Step 1: Initialization & Resume Check
+### Step 1: Initialization
 *   Load configuration from YAML file (see [Configuration](./06_configuration.md)).
 *   Load secrets from `.env` file (API key).
-*   Fetch Prefect Variable `GEMINI_CURRENT_BATCH_ID`.
+*   Read Prefect Variables:
+    *   `active_batch_ids` (list)
+    *   `batch_record_keys` (mapping batch -> record keys)
+    *   `inflight_record_ids` (set of record keys already scheduled)
+    *   `record_failure_counts`
 
-### Step 2 (Branch A): Active Batch Exists
-**Condition:** `GEMINI_CURRENT_BATCH_ID` is not None.
-
-1.  **Task: `check_batch_status`**
-    *   Query Gemini Batch API using the stored batch ID.
-    *   Check batch job state:
-        *   **Case: `JOB_STATE_PROCESSING`:** Log "Waiting for Batch X" and Exit Flow (Wait for next schedule).
-        *   **Case: `JOB_STATE_FAILED`:** Log Error, Clear `GEMINI_CURRENT_BATCH_ID`, Exit (Will retry submission next tick).
-        *   **Case: `JOB_STATE_CANCELLED`:** Log Warning, Clear `GEMINI_CURRENT_BATCH_ID`, Exit.
-        *   **Case: `JOB_STATE_EXPIRED`:** Log Warning, Clear `GEMINI_CURRENT_BATCH_ID`, Exit.
-        *   **Case: `JOB_STATE_SUCCEEDED`:** Proceed to Result Processing.
-    *   Batch job state is accessed via the batch job object's `state.name` property.
-
-2.  **Task: `process_batch_results`**
-    *   Retrieve the result file name from the completed batch job's destination configuration.
+### Step 2: Service Active Batches
+For each `active_batch_id`:
+1.  **Task: `wait_for_batch_completion`**
+    *   Poll Gemini Batch API until a terminal state or timeout.
+    *   Accepts and handles states including `JOB_STATE_PARTIALLY_SUCCEEDED`.
+2.  **Task: `process_batch_results` (when terminal success/partial)**
     *   Download the results JSONL file from Gemini File API.
     *   Parse the JSONL file line by line:
         *   Each line contains a JSON object with a `key` (matching the request key) and either a `response` (success) or `error` (failure).
         *   Extract the text content from successful responses.
         *   **Validation:** Parse output against Pydantic Schema.
         *   **On Success:** Write JSON to `output_results_dir`. Log Info.
-        *   **On Failure:**
-            *   Log Error in Prefect UI with the specific record key.
-            *   Load `RECORD_FAILURE_COUNTS` variable.
-            *   Increment count for this record ID.
-            *   Save variable.
-            *   *Do NOT write to output dir.* (This ensures retry).
-    *   **Cleanup:**
-        *   Clear `GEMINI_CURRENT_BATCH_ID`.
-        *   Create **Prefect Artifact** (Report).
+        *   **On Failure:** Increment `record_failure_counts` and skip writing (so it re-queues on the next scan).
+    *   **Cleanup:** Remove the batch ID from `active_batch_ids`, delete its entry in `batch_record_keys`, and remove its record keys from `inflight_record_ids`.
+3.  **If terminal failure/cancel/expire:** Remove the batch ID and inflight record keys so the scanner can re-queue them.
+4.  **If still running/pending after timeout:** Leave the batch ID in `active_batch_ids` (will be picked up next run).
 
-### Step 3 (Branch B): No Active Batch
-**Condition:** `GEMINI_CURRENT_BATCH_ID` is None.
-
-1.  **Task: `scan_and_build_dag`**
-    *   **Input:** Configuration paths, `output_results_dir`, `RECORD_FAILURE_COUNTS`.
-    *   **Logic:**
-        1.  Glob all `.json` files in `label_to_curricular` directory (Filtered by Config state/year).
-        2.  Group by Book (State/School/Year).
-        3.  Sort Pages Numerically.
-        4.  **Iterate Pages:**
-            *   If exists in `output_results`: **SKIP**.
-            *   If failure count > `max_retries`: **SKIP** (Dead Letter).
-            *   If Page Num == Minimum in directory: **ADD** (Start of book).
-            *   If `(Page Num - 1)` exists in `output_results`: **ADD** (Dependency Met).
-            *   Else: **BREAK** book loop (Wait for dependency).
-    *   **Output:** List of `runnable_ids` (page identifiers).
-
-2.  **Task: `submit_new_batch`**
-    *   **Input:** `runnable_ids`.
-    *   **Logic:**
-        *   If list is empty: Log "No work pending" and Exit.
-        *   **Phase 1: Upload Images via File API**
-            *   For each runnable page, upload the corresponding image file to Gemini File API.
-            *   Store the returned file URI and metadata for each image.
-            *   If upload fails, retry with exponential backoff (up to configured max retries).
-            *   On retry, always re-upload the image (simplifies file verification - no need to check if file still exists).
-        *   **Phase 2: Build Batch Request JSONL**
-            *   For each runnable page:
-                *   Load context from previous page JSON in `output_results` if dependency exists.
-                *   Construct the prompt text (including context if available).
-                *   Build a request object with:
-                    *   `key`: Unique identifier for this record (e.g., `"{state}:{school}:{year}:{page}"`)
-                    *   `request`: Contains `contents` array with:
-                        *   Text part: The prompt
-                        *   File data part: Reference to the uploaded image file URI
-            *   Write all requests to a JSONL file (one JSON object per line).
-        *   **Phase 3: Upload JSONL File**
-            *   Upload the JSONL file containing batch requests to Gemini File API.
-            *   Store the returned file name/URI.
-        *   **Phase 4: Create Batch Job**
-            *   Submit batch job to Gemini Batch API:
-                *   Specify the model name (from configuration).
-                *   Reference the uploaded JSONL file as the input source.
-                *   Optionally set display name and other metadata.
-            *   Store the returned batch job ID/name.
-        *   **Save Batch ID** to `GEMINI_CURRENT_BATCH_ID` Prefect Variable.
+### Step 3: Submit New Batches (Fill Available Slots)
+1.  Determine available slots: `max_concurrent_batches - len(active_batch_ids)`.
+2.  Loop while slots remain:
+    *   **Task: `scan_and_build_dag`**
+        *   Input: configuration paths, `output_results_dir`, `record_failure_counts`, and `inflight_record_ids`.
+        *   Logic:
+            *   Glob `.json` files in `label_to_curricular` (filtered by config state/year).
+            *   Group by Book (State/School/Year), sort pages.
+            *   For each page:
+                *   Skip if already in `output_results`.
+                *   Skip if failure count > `max_retries`.
+                *   Skip if page key is in `inflight_record_ids` (already scheduled).
+                *   Dependency rule: page can run if it is the first in the book OR previous page exists in `output_results`.
+            *   Output limited to `batch_size_limit`.
+    *   **Task: `submit_new_batch`**
+        *   Upload images to File API (with retries/backoff).
+        *   Build JSONL payload with prompt and file references.
+        *   Upload JSONL, create a Gemini Batch job.
+        *   Return `{batch_id, record_keys}`.
+    *   Add the new batch ID to `active_batch_ids`, map `batch_record_keys[batch_id] = record_keys`, and add `record_keys` to `inflight_record_ids`.
+    *   Decrement available slots and repeat.
 
 ## 2. Retry Logic & Error Handling
 
@@ -97,9 +62,9 @@ When uploading images to File API:
 *   This simplifies file lifecycle management - we don't need to track file expiration or verify file validity.
 
 ### Batch-Level Failure (System Crash)
-If the Python script/Prefect agent crashes while a batch is submitted:
-1.  **Recovery:** Next time the flow runs, it reads `GEMINI_CURRENT_BATCH_ID`.
-2.  **Action:** It queries Gemini Batch API. If batch state is `JOB_STATE_SUCCEEDED`, we process results. We do not lose track of the batch.
+If the Python script/Prefect agent crashes while batches are submitted:
+1.  **Recovery:** Next time the flow runs, it reads `active_batch_ids`.
+2.  **Action:** It queries each batch in `active_batch_ids`. If a batch state is terminal, it processes results (if available) and removes it from state. We do not lose track of batches.
 
 ### Record-Level Failure (Bad Output)
 If Gemini returns invalid JSON for a specific page:

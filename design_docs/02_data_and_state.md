@@ -29,25 +29,26 @@ The scanner iterates **only** this directory structure.
 
 Instead of a local `metadata.json`, we use **Prefect Variables**.
 
-### Variable A: `GEMINI_CURRENT_BATCH_ID`
+### Variable A: `active_batch_ids`
 
-* **Type:** String (Nullable)
-* **Purpose:** Stores the ID of the currently running remote job.
-* **Logic:**
-  * If set: Flow goes into "Polling/Processing" mode.
-  * If null: Flow goes into "Scanning/Submission" mode.
+* **Type:** List[string]
+* **Purpose:** Track all in-flight batch IDs (supports multiple concurrent batches).
+* **Logic:** Append on submission; remove when a batch reaches a terminal state.
 
-### Variable B: `RECORD_FAILURE_COUNTS`
+### Variable B: `batch_record_keys`
+
+* **Type:** Dict[batch_id, List[string]]
+* **Purpose:** Map batch IDs to their record keys so we can clear inflight records when a batch completes or fails.
+
+### Variable C: `inflight_record_ids`
+
+* **Type:** List[string]
+* **Purpose:** Record keys that are already scheduled in an active batch. The scanner skips these to avoid double-sending while a batch is pending.
+
+### Variable D: `record_failure_counts`
 
 * **Type:** JSON Dictionary
 * **Purpose:** Tracks how many times a specific page has failed.
-* **Structure:**
-  ```json
-  {
-    "CA:Lincoln:2023:4": 1,
-    "NY:Adams:1890:10": 3
-  }
-  ```
 * **Logic:**
   * Incremented when a record returns 400/500 from Gemini OR fails Pydantic validation after parsing.
   * If `count > max_retries`, the Scanner ignores this ID (Dead Letter logic).

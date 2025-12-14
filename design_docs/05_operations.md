@@ -6,9 +6,9 @@
 | :--- | :--- | :--- | :--- |
 | **Network / 5xx** | Transient HTTP error during submission or polling. | **Prefect Task Retry.** The specific task retries automatically (e.g., 3 times). | None. |
 | **File Upload Failure** | Image file upload to File API fails (network, timeout, size limit). | **Retry with Exponential Backoff.** Re-upload the image file up to configured max retries. | None. If all retries fail, the page is skipped for this batch cycle. |
-| **Batch Job Fail** | Gemini Batch API returns `JOB_STATE_FAILED`. | **Flow Logic.** Logs error, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
-| **Batch Job Cancelled** | Batch job is cancelled (manual or timeout). | **Flow Logic.** Logs warning, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
-| **Batch Job Expired** | Batch job expires before completion. | **Flow Logic.** Logs warning, clears `GEMINI_CURRENT_BATCH_ID` variable. | None. Next scheduled run will re-submit. |
+| **Batch Job Fail** | Gemini Batch API returns `JOB_STATE_FAILED`. | **Flow Logic.** Logs error, removes batch ID from `active_batch_ids`, frees inflight records. | None. Next scheduled run will re-submit. |
+| **Batch Job Cancelled** | Batch job is cancelled (manual or timeout). | **Flow Logic.** Logs warning, removes batch ID from `active_batch_ids`, frees inflight records. | None. Next scheduled run will re-submit. |
+| **Batch Job Expired** | Batch job expires before completion. | **Flow Logic.** Logs warning, removes batch ID from `active_batch_ids`, frees inflight records. | None. Next scheduled run will re-submit. |
 | **Validation Error** | Model returns valid JSON, but schema validation fails (e.g., missing fields). | **Partial Failure.** Output NOT written. `RECORD_FAILURE_COUNTS` var incremented. | None. Scanner will re-queue pending retry limit. |
 | **Max Retries** | Specific Page fails validation > configured `max_retries`. | **Dead Letter.** Scanner sees count > limit and skips this page. | **Manual Intervention** required to fix prompt or source image. |
 | **Worker Crash** | Python/Prefect process dies mid-execution. | **State Recovery.** `GEMINI_CURRENT_BATCH_ID` persists in Prefect Cloud/DB. | **Restart Flow.** It checks the variable and resumes polling. |
@@ -30,9 +30,9 @@ This approach simplifies file lifecycle management:
 ## 3. Operational Playbook
 
 ### A. How to Resume
-Since the system is a State Machine driven by the `GEMINI_CURRENT_BATCH_ID` Prefect Variable, you do not need to do anything special.
+The system is driven by Prefect Variables (`active_batch_ids`, `batch_record_keys`, `inflight_record_ids`, `record_failure_counts`).
 1.  Ensure the Prefect Agent/Worker is running.
-2.  The next scheduled Flow run will detect the Variable and resume polling the remote batch.
+2.  The next scheduled Flow run will detect any active batches and resume polling/processing.
 
 ### B. How to Force-Retry a "Done" Page
 If a page is marked "Success" (exists in `dataset/output_results`) but you want to re-run it:
@@ -48,10 +48,10 @@ If a page has failed 3 times (or whatever max is set), the Scanner stops picking
 4.  **Result:** The Scanner will treat it as a fresh candidate.
 
 ### D. How to Clear a "Stuck" Batch
-If `GEMINI_CURRENT_BATCH_ID` is set, but you know the job is dead/irrelevant and want to force a new submission:
+If a batch ID is stuck in `active_batch_ids`, but you know the job is dead/irrelevant and want to force a new submission:
 1.  Go to **Prefect UI -> Variables**.
-2.  Delete or clear the value of `GEMINI_CURRENT_BATCH_ID`.
-3.  **Result:** The next Flow run will see `None` and switch to "Scanning Mode" to create a new batch.
+2.  Delete the batch ID from `active_batch_ids`, and remove its entry in `batch_record_keys` and `inflight_record_ids`.
+3.  **Result:** The next Flow run will see open capacity and create new batches.
 
 ## 4. Observability (Prefect UI)
 
@@ -73,11 +73,13 @@ Standard logs are structured for filtering:
 
 ### 3. Variables
 The current snapshot of the system state is always visible in **Prefect UI -> Variables**:
-*   `GEMINI_CURRENT_BATCH_ID`: Are we waiting on Google?
-*   `RECORD_FAILURE_COUNTS`:Which pages are struggling?
+*   `active_batch_ids`: Which batches are in flight?
+*   `batch_record_keys`: Which records belong to each batch?
+*   `inflight_record_ids`: Which record keys are already scheduled?
+*   `record_failure_counts`: Which pages are struggling?
 
 ## 5. Maintenance
 
 ### Pruning Failure Counts
-Over months, `RECORD_FAILURE_COUNTS` might grow large.
+Over months, `record_failure_counts` might grow large.
 *   **Recommendation:** Create a separate maintenance task (or manual script) that runs once a month to remove keys for IDs that currently exist in `dataset/output_results` (meaning they eventually succeeded)

@@ -200,7 +200,7 @@ This document outlines the recommended order for building the system components.
    *   Handle write failures
 
 4. **Failure Tracking**
-   *   Update `RECORD_FAILURE_COUNTS` Prefect Variable
+   *   Update `record_failure_counts` Prefect Variable
    *   Increment failure counts
    *   Identify dead letters (max retries exceeded)
 
@@ -232,12 +232,14 @@ This document outlines the recommended order for building the system components.
 
 1. **Prefect Flow Structure**
    *   Main flow function
-   *   State machine logic (check active batch vs. scan & submit)
+   *   State machine logic with multiple concurrent batches (poll/process existing, then submit new if slots available)
    *   Task definitions for each phase
 
 2. **Prefect Variable Integration**
-   *   Read/write `GEMINI_CURRENT_BATCH_ID`
-   *   Read/write `RECORD_FAILURE_COUNTS`
+   *   Read/write `active_batch_ids`
+   *   Read/write `batch_record_keys`
+   *   Read/write `inflight_record_ids`
+   *   Read/write `record_failure_counts`
    *   Handle variable initialization
 
 3. **Flow Scheduling**
@@ -417,6 +419,5 @@ Each phase should have:
 *   Test with real APIs early (integration tests)
 *   Review design docs before implementation
 *   Pair programming or code review for complex logic
-
 
 
