@@ -22,7 +22,7 @@ This document outlines the recommended order for building the system components.
    *   Filesystem scanner for `label_to_curricular` directory
    *   Dependency resolution logic (page N depends on page N-1)
    *   Filtering by state and year range
-   *   Integration with Prefect Variables for failure counts
+   *   Integration with SQLite database for failure counts
    *   Output: List of runnable page identifiers
 
 **Why First**: This is the foundation that defines what work needs to be done. All other components depend on knowing which pages to process.
@@ -33,7 +33,7 @@ This document outlines the recommended order for building the system components.
 *   Test scanner with various directory structures
 *   Test dependency resolution logic
 *   Test filtering logic
-*   Test integration with Prefect Variables (mocked)
+*   Test integration with SQLite database (mocked)
 
 **Acceptance Criteria**:
 

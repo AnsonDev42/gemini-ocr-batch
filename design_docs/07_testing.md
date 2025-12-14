@@ -63,7 +63,7 @@ tests/
     *   Expected: Returns only pages from 1849 and 1850 books
 
 *   **Test: Skip Max Retries**
-    *   Input: Page with failure count > max_retries in Prefect Variable
+    *   Input: Page with failure count > max_retries in SQLite database
     *   Expected: Page is excluded from runnable list (dead letter)
 
 *   **Test: Skip Already Completed**
@@ -269,7 +269,7 @@ tests/
 
 *   Uses Prefect SQLite backend (local)
 *   Mocks File API and Batch API calls
-*   Verifies Prefect Variables are set correctly
+*   Verifies SQLite database state is set correctly
 
 **Test Cases**:
 
@@ -306,7 +306,7 @@ tests/
 
 *   **Mock File API Responses**: File upload success/failure responses
 *   **Mock Batch API Responses**: Batch job status, creation, result download responses
-*   **Mock Prefect Variables**: Prefect Variable get/set operations
+*   **Mock SQLite Database**: SQLite database read/write operations
 
 ## Test Execution
 

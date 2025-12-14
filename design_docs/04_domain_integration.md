@@ -2,8 +2,8 @@
 
 ## Phase 1: Setup & Configuration
 1.  Define `pydantic_models.py` (Config, PageID, Schema).
-2.  Set up Prefect profile and ensure SQLite/Postgres is running.
-3.  Create helper functions to read/write Prefect Variables (`get_variable`, `set_variable`).
+2.  Set up Prefect profile and ensure SQLite database is initialized.
+3.  Create SQLite database schema and helper functions for state management (`SQLiteStateStore`).
 
 ## Phase 2: The Scanner (Local Logic)
 1.  Implement `scan_directory` function using `pathlib`.
