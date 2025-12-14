@@ -65,13 +65,35 @@ def process_results_jsonl(
     outcomes: list[RecordOutcome] = []
     successes: dict[str, OcrPageResult] = {}
 
-    for raw_line in jsonl_bytes.decode("utf-8").splitlines():
+    for idx, raw_line in enumerate(
+        jsonl_bytes.decode("utf-8", errors="replace").splitlines(), start=1
+    ):
         line = raw_line.strip()
         if not line:
             continue
-        record = json.loads(line)
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            outcomes.append(
+                RecordOutcome(
+                    key=f"<invalid-json-line-{idx}>",
+                    success=False,
+                    error=f"Invalid JSON on line {idx}: {exc}",
+                    output_path=None,
+                )
+            )
+            continue
+
         key = record.get("key")
         if not isinstance(key, str):
+            outcomes.append(
+                RecordOutcome(
+                    key=f"<missing-key-line-{idx}>",
+                    success=False,
+                    error="Missing or invalid record key",
+                    output_path=None,
+                )
+            )
             continue
 
         if "error" in record:

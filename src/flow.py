@@ -16,7 +16,7 @@ from .batch_api import (
     download_result_file,
     wait_for_batch_completion,
 )
-from .batch_builder import build_batch_records, write_jsonl
+from .batch_builder import build_batch_records, load_previous_result, write_jsonl
 from .config import AppConfig
 from .env import get_gemini_api_key
 from .file_api import (
@@ -25,11 +25,12 @@ from .file_api import (
     upload_files_in_parallel,
 )
 from .gemini_client import create_gemini_client
-from .models import PageId
+from .models import PageId, format_previous_context
 from .prefect_state import PrefectVariableStateStore, StateStore
 from .prompting import load_prompt_template
 from .results import process_results_jsonl
 from .scanner import scan_runnable_pages
+from .tracking import BatchBraintrustTracker, TrackingContext
 
 
 def _generation_config_dict(config: AppConfig) -> dict | None:
@@ -46,26 +47,73 @@ def _slug(text: str) -> str:
     return cleaned.strip("-") or "artifact"
 
 
+def _render_prompt_for_tracking(
+    *,
+    page_id: PageId,
+    prompt_template,
+    label_source_dir: Path,
+    output_dir: Path,
+    logger,
+) -> tuple[str, str | None]:
+    dependency_page = page_id.page - 1
+    previous_context: str | None = None
+
+    if dependency_page > 0:
+        dep_label = (
+            label_source_dir
+            / page_id.state
+            / page_id.school
+            / str(page_id.year)
+            / f"{dependency_page}.json"
+        )
+        if dep_label.exists():
+            dep_id = PageId(
+                state=page_id.state,
+                school=page_id.school,
+                year=page_id.year,
+                page=dependency_page,
+            )
+            dep_output = dep_id.output_path(output_dir)
+            if dep_output.exists():
+                try:
+                    previous_result = load_previous_result(dep_output)
+                    previous_context = format_previous_context(previous_result)
+                except Exception as exc:  # noqa: BLE001 - observability
+                    logger.debug(
+                        "Failed to load previous context for %s: %s",
+                        dep_id.key(),
+                        exc,
+                    )
+
+    try:
+        prompt = prompt_template.render(previous_context=previous_context)
+    except Exception as exc:  # noqa: BLE001 - observability
+        logger.debug("Failed to render prompt for %s: %s", page_id.key(), exc)
+        prompt = ""
+    return prompt, previous_context
+
+
 @task(cache_policy=NO_CACHE, persist_result=False)
 def task_process_batch_results(
     *,
+    config: AppConfig,
     batch_id: str,
     store: StateStore,
     result_file_name: str,
     output_dir: Path,
 ) -> dict[str, Any]:
     logger = get_run_logger()
+    generation_config = _generation_config_dict(config)
     client = create_gemini_client(get_gemini_api_key())
     blob = download_result_file(client=client.client, file_name=result_file_name)
-    outcomes, _ = process_results_jsonl(jsonl_bytes=blob, output_dir=output_dir)
+    outcomes, successes = process_results_jsonl(jsonl_bytes=blob, output_dir=output_dir)
 
+    initial_failure_counts = store.get_failure_counts()
     failures: dict[str, str] = {
         o.key: (o.error or "unknown error") for o in outcomes if not o.success
     }
     updated_failure_counts = (
-        store.increment_failure_counts(failures)
-        if failures
-        else store.get_failure_counts()
+        store.increment_failure_counts(failures) if failures else initial_failure_counts
     )
 
     store.remove_batch(batch_id)
@@ -88,19 +136,26 @@ def task_process_batch_results(
 
     rows = []
     for outcome in outcomes:
-        pid = PageId.from_key(outcome.key)
-        rows.append(
-            {
-                "batch_id": batch_id,
-                "record_key": outcome.key,
-                "state": pid.state,
-                "school": pid.school,
-                "year": pid.year,
-                "page": pid.page,
-                "status": "success" if outcome.success else "failure",
-                "error": outcome.error or "",
-            }
-        )
+        try:
+            pid = PageId.from_key(outcome.key)
+        except ValueError:
+            pid = None
+        row: dict[str, Any] = {
+            "batch_id": batch_id,
+            "record_key": outcome.key,
+            "status": "success" if outcome.success else "failure",
+            "error": outcome.error or "",
+        }
+        if pid:
+            row.update(
+                {
+                    "state": pid.state,
+                    "school": pid.school,
+                    "year": pid.year,
+                    "page": pid.page,
+                }
+            )
+        rows.append(row)
 
     try:
         create_markdown_artifact(markdown="\n".join(report))
@@ -114,6 +169,49 @@ def task_process_batch_results(
         )
     except Exception as exc:  # noqa: BLE001 - optional observability
         logger.warning("Failed to create Prefect table artifact: %s", exc)
+
+    tracker = BatchBraintrustTracker()
+    if tracker.enabled:
+        prompt_template = load_prompt_template(
+            registry_dir=config.prompt.registry_dir,
+            name=config.prompt.name,
+            template_file=config.prompt.template_file,
+        )
+
+        for outcome in outcomes:
+            try:
+                pid = PageId.from_key(outcome.key)
+            except ValueError:
+                logger.debug(
+                    "Skipping Braintrust log; invalid record key: %s", outcome.key
+                )
+                continue
+            prompt, previous_context = _render_prompt_for_tracking(
+                page_id=pid,
+                prompt_template=prompt_template,
+                label_source_dir=config.paths.label_source_dir,
+                output_dir=output_dir,
+                logger=logger,
+            )
+            attempt = initial_failure_counts.get(outcome.key, 0) + 1
+
+            tracker.log_record(
+                TrackingContext(
+                    batch_id=batch_id,
+                    page_id=pid,
+                    prompt=prompt,
+                    previous_context=previous_context,
+                    model=config.model.name,
+                    prompt_name=config.prompt.name,
+                    prompt_template=config.prompt.template_file,
+                    generation_config=generation_config,
+                    attempt=attempt,
+                    output=successes.get(outcome.key),
+                    error=outcome.error,
+                )
+            )
+    elif tracker.disabled_reason:
+        logger.info("Braintrust tracker disabled: %s", tracker.disabled_reason)
 
     logger.info(
         "Processed batch results: %s success, %s failure", success_count, failure_count
@@ -325,6 +423,7 @@ def orchestrate_gemini_batch(*, config: AppConfig) -> None:
                         )
                     else:
                         task_process_batch_results(
+                            config=config,
                             batch_id=batch_id,
                             store=store,
                             result_file_name=result_file_name,
