@@ -233,6 +233,8 @@ def task_process_batch_results(
                     attempt=attempt,
                     output=successes.get(outcome.key),
                     error=outcome.error,
+                    raw_response_json=outcome.raw_response_json,
+                    raw_response_text=outcome.raw_response_text,
                 )
             )
     elif tracker.disabled_reason:

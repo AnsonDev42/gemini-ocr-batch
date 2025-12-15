@@ -24,6 +24,8 @@ class TrackingContext:
     attempt: int
     output: OcrPageResult | None
     error: str | None
+    raw_response_json: str | None
+    raw_response_text: str | None
 
 
 class BatchBraintrustTracker:
@@ -79,6 +81,8 @@ class BatchBraintrustTracker:
                         "prompt_name": ctx.prompt_name,
                         "prompt_template": ctx.prompt_template,
                         "error": ctx.error,
+                        "raw_response_json": ctx.raw_response_json,
+                        "raw_response_text": ctx.raw_response_text,
                     },
                     metrics={
                         "success": 1 if ctx.output is not None else 0,
