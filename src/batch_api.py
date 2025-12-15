@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
 
-TERMINAL_STATES = {
-    "JOB_STATE_SUCCEEDED",
-    "JOB_STATE_PARTIALLY_SUCCEEDED",
-    "JOB_STATE_FAILED",
-    "JOB_STATE_CANCELLED",
-    "JOB_STATE_EXPIRED",
-}
+from src.enums import BatchJobState
 
 
-@dataclass(frozen=True, slots=True)
-class BatchStatus:
+class BatchJobStatus(BaseModel):
+    """Status of a batch job from Gemini API."""
+
     batch_id: str
-    state: str
-    result_file_name: str | None
+    state: BatchJobState
+    result_file_name: str | None = None
+
+    model_config = {"frozen": True}
 
 
 def create_batch_job(
@@ -30,13 +27,21 @@ def create_batch_job(
     return job.name
 
 
-def get_batch_status(*, client: Any, batch_id: str) -> BatchStatus:
+def get_batch_status(*, client: Any, batch_id: str) -> BatchJobStatus:
     job_info = client.batches.get(name=batch_id)
-    state = job_info.state.name
+    state_str = job_info.state.name
+
+    # Convert string to enum, handling unknown states gracefully
+    try:
+        state = BatchJobState(state_str)
+    except ValueError:
+        # If we get an unknown state, treat it as PROCESSING
+        state = BatchJobState.PROCESSING
+
     result_file_name = None
-    if state in {"JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED"}:
+    if state in BatchJobState.success_states():
         result_file_name = getattr(getattr(job_info, "dest", None), "file_name", None)
-    return BatchStatus(
+    return BatchJobStatus(
         batch_id=batch_id, state=state, result_file_name=result_file_name
     )
 
@@ -47,14 +52,15 @@ def wait_for_batch_completion(
     batch_id: str,
     poll_interval_seconds: int,
     max_poll_attempts: int,
-) -> BatchStatus:
+) -> BatchJobStatus:
     for _ in range(max_poll_attempts):
         status = get_batch_status(client=client, batch_id=batch_id)
-        if status.state in TERMINAL_STATES:
+        if status.state in BatchJobState.terminal_states():
             return status
         time.sleep(poll_interval_seconds)
-    raise TimeoutError(
-        f"Batch {batch_id} did not complete after {max_poll_attempts} polls"
+    # Return timeout status instead of raising
+    return BatchJobStatus(
+        batch_id=batch_id, state=BatchJobState.TIMEOUT, result_file_name=None
     )
 
 

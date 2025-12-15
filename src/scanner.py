@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from .models import PageId
 
 
-@dataclass(frozen=True, slots=True)
-class ScanResult:
+class ScanResult(BaseModel):
+    """Result of scanning for runnable pages."""
+
     runnable: list[PageId]
     total_candidates: int
+
+    model_config = {"frozen": True}
 
 
 def _parse_page_id(label_root: Path, label_file: Path) -> PageId | None:

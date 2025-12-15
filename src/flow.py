@@ -11,26 +11,26 @@ from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.cache_policies import NO_CACHE
 
 from .batch_api import (
-    TERMINAL_STATES,
     create_batch_job,
     download_result_file,
     wait_for_batch_completion,
 )
-from .batch_builder import build_batch_records, load_previous_result, write_jsonl
-from .config import AppConfig
-from .env import get_gemini_api_key
-from .file_api import (
+from src.enums import BatchJobState
+from src.batch_builder import build_batch_records, load_previous_result, write_jsonl
+from src.config import AppConfig
+from src.env import get_gemini_api_key
+from src.file_api import (
     guess_mime_type,
     upload_file_with_retries,
     upload_files_in_parallel,
 )
-from .gemini_client import create_gemini_client
-from .models import PageId, format_previous_context
-from .prefect_state import SQLiteStateStore
-from .prompting import load_prompt_template
-from .results import process_results_jsonl
-from .scanner import scan_runnable_pages
-from .tracking import BatchBraintrustTracker, TrackingContext
+from src.gemini_client import create_gemini_client
+from src.models import PageId, format_previous_context
+from src.prefect_state import SQLiteStateStore
+from src.prompting import load_prompt_template
+from src.results import process_results_jsonl
+from src.scanner import scan_runnable_pages
+from src.tracking import BatchBraintrustTracker, TrackingContext
 
 
 def _generation_config_dict(config: AppConfig) -> dict | None:
@@ -125,7 +125,7 @@ def task_process_batch_results(
                     record_key=outcome.key,
                     batch_id=batch_id,
                     attempt_number=attempt_number,
-                    error_type=outcome.error_type,
+                    error_type=outcome.error_type.value if outcome.error_type else None,
                     error_message=outcome.error,
                     error_traceback=outcome.error_traceback,
                     raw_response_text=outcome.raw_response_text,
@@ -403,28 +403,19 @@ def task_wait_for_batch_completion(
 ) -> dict[str, Any]:
     logger = get_run_logger()
     client = create_gemini_client(get_gemini_api_key())
-    try:
-        status = wait_for_batch_completion(
-            client=client.client,
-            batch_id=batch_id,
-            poll_interval_seconds=poll_interval_seconds,
-            max_poll_attempts=max_poll_attempts,
-        )
-        logger.info("Batch %s reached state %s", batch_id, status.state)
-        return {
-            "active": True,
-            "batch_id": batch_id,
-            "state": status.state,
-            "result_file_name": status.result_file_name,
-        }
-    except TimeoutError as exc:
-        logger.warning("Batch %s polling timed out: %s", batch_id, exc)
-        return {
-            "active": True,
-            "batch_id": batch_id,
-            "state": "TIMEOUT",
-            "result_file_name": None,
-        }
+    status = wait_for_batch_completion(
+        client=client.client,
+        batch_id=batch_id,
+        poll_interval_seconds=poll_interval_seconds,
+        max_poll_attempts=max_poll_attempts,
+    )
+    logger.info("Batch %s reached state %s", batch_id, status.state.value)
+    return {
+        "active": True,
+        "batch_id": batch_id,
+        "state": status.state,
+        "result_file_name": status.result_file_name,
+    }
 
 
 @flow(name="orchestrate_gemini_batch")
@@ -443,10 +434,10 @@ def orchestrate_gemini_batch(*, config: AppConfig) -> None:
                 poll_interval_seconds=config.batch.poll_interval_seconds,
                 max_poll_attempts=config.batch.max_poll_attempts,
             )
-            state = status.get("state")
-            if state in TERMINAL_STATES:
+            state: BatchJobState = status.get("state")
+            if state in BatchJobState.terminal_states():
                 made_progress = True
-                if state in {"JOB_STATE_SUCCEEDED", "JOB_STATE_PARTIALLY_SUCCEEDED"}:
+                if state in BatchJobState.success_states():
                     result_file_name = status.get("result_file_name")
                     if not result_file_name:
                         logger.error(
@@ -463,11 +454,11 @@ def orchestrate_gemini_batch(*, config: AppConfig) -> None:
                         )
                 else:
                     logger.warning(
-                        "Batch %s ended in state %s; clearing", batch_id, state
+                        "Batch %s ended in state %s; clearing", batch_id, state.value
                     )
                     store.remove_batch(batch_id)
             else:
-                logger.info("Batch %s still in state %s", batch_id, state)
+                logger.info("Batch %s still in state %s", batch_id, state.value)
 
         # Submit new batches if slots are available
         while True:

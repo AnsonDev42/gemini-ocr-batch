@@ -14,6 +14,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from src.enums import BatchStatus
+
 
 def _find_project_root() -> Path:
     """Find the project root by looking for pyproject.toml or .git directory."""
@@ -44,7 +46,7 @@ class ActiveBatch(Base):
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
-    status = Column(String, default="active", nullable=False)
+    status = Column(String, default=BatchStatus.ACTIVE.value, nullable=False)
 
     __table_args__ = (
         Index("idx_active_batches_created_at", "created_at"),

@@ -2,30 +2,34 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from typing import Any
 
 from braintrust import init_logger, start_span
+from pydantic import BaseModel
 
 from .models import OcrPageResult, PageId
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class TrackingContext:
+class TrackingContext(BaseModel):
+    """Context for tracking a single record in Braintrust."""
+
     batch_id: str
     page_id: PageId
     prompt: str
-    previous_context: str | None
+    previous_context: str | None = None
     model: str
     prompt_name: str
     prompt_template: str
-    generation_config: dict | None
+    generation_config: dict[str, Any] | None = None
     attempt: int
-    output: OcrPageResult | None
-    error: str | None
-    raw_response_json: str | None
-    raw_response_text: str | None
+    output: OcrPageResult | None = None
+    error: str | None = None
+    raw_response_json: str | None = None
+    raw_response_text: str | None = None
+
+    model_config = {"frozen": True}
 
 
 class BatchBraintrustTracker:

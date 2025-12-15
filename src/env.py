@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel
 
-@dataclass(frozen=True)
-class Env:
+
+class Env(BaseModel):
+    """Environment configuration."""
+
     gemini_api_key: str
+
+    model_config = {"frozen": True}
 
 
 def get_gemini_api_key() -> str:

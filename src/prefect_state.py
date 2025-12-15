@@ -12,6 +12,7 @@ from .database import (
     get_session,
     init_database,
 )
+from src.enums import BatchStatus
 
 
 @dataclass
@@ -26,7 +27,8 @@ class SQLiteStateStore:
         """Get list of active batch IDs."""
         with get_session() as session:
             result = session.execute(
-                text("SELECT batch_id FROM active_batches WHERE status = 'active'")
+                text("SELECT batch_id FROM active_batches WHERE status = :status"),
+                {"status": BatchStatus.ACTIVE.value},
             )
             return [row[0] for row in result]
 
@@ -38,12 +40,17 @@ class SQLiteStateStore:
             session.execute(
                 text("""
                     INSERT INTO active_batches (batch_id, created_at, updated_at, status)
-                    VALUES (:batch_id, :created_at, :updated_at, 'active')
+                    VALUES (:batch_id, :created_at, :updated_at, :status)
                     ON CONFLICT(batch_id) DO UPDATE SET
-                        status = 'active',
+                        status = :status,
                         updated_at = :updated_at
                 """),
-                {"batch_id": batch_id, "created_at": now, "updated_at": now},
+                {
+                    "batch_id": batch_id,
+                    "created_at": now,
+                    "updated_at": now,
+                    "status": BatchStatus.ACTIVE.value,
+                },
             )
 
             # Get old record keys before deletion (to remove from inflight records)
@@ -117,10 +124,14 @@ class SQLiteStateStore:
             session.execute(
                 text("""
                     UPDATE active_batches
-                    SET status = 'completed', updated_at = :updated_at
+                    SET status = :status, updated_at = :updated_at
                     WHERE batch_id = :batch_id
                 """),
-                {"batch_id": batch_id, "updated_at": datetime.utcnow()},
+                {
+                    "batch_id": batch_id,
+                    "status": BatchStatus.COMPLETED.value,
+                    "updated_at": datetime.utcnow(),
+                },
             )
 
             # Delete batch record keys

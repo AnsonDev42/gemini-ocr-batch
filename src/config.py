@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -91,10 +90,13 @@ class AppConfig(BaseModel):
     prefect: PrefectConfig = Field(default_factory=PrefectConfig)
 
 
-@dataclass(frozen=True)
-class ConfigLoadResult:
+class ConfigLoadResult(BaseModel):
+    """Result of loading configuration file."""
+
     config: AppConfig
     path: Path
+
+    model_config = {"frozen": True}
 
 
 def load_config(config_path: Path) -> ConfigLoadResult:

@@ -3,18 +3,21 @@ from __future__ import annotations
 import mimetypes
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from google.genai import types
+from pydantic import BaseModel
 
 
-@dataclass(frozen=True, slots=True)
-class UploadedFile:
+class UploadedFile(BaseModel):
+    """Metadata for a file uploaded to Gemini File API."""
+
     name: str
     uri: str
-    mime_type: str | None
+    mime_type: str | None = None
+
+    model_config = {"frozen": True}
 
 
 def guess_mime_type(path: Path) -> str:

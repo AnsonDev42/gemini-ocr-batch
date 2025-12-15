@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from .file_api import UploadedFile
-from .models import OcrPageResult, PageId, format_previous_context
-from .prompting import PromptTemplate
+from pydantic import BaseModel
+
+from src.file_api import UploadedFile
+from src.models import OcrPageResult, PageId, format_previous_context
+from src.prompting import PromptTemplate
 
 
-@dataclass(frozen=True, slots=True)
-class BatchRecord:
+class BatchRecord(BaseModel):
+    """A single record in a batch request JSONL file."""
+
     key: str
-    request: dict
+    request: dict[str, Any]
+
+    model_config = {"frozen": True}
 
 
 def build_request(

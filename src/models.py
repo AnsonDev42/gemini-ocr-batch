@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
 
 
-@dataclass(frozen=True, slots=True)
-class PageId:
+class PageId(BaseModel):
+    """Identifier for a single page in the dataset."""
+
     state: str
     school: str
     year: int
     page: int
 
+    model_config = {"frozen": True}
+
     def key(self) -> str:
+        """Generate a unique key string for this page ID."""
         return f"{self.state}:{self.school}:{self.year}:{self.page}"
 
     @classmethod
     def from_key(cls, key: str) -> "PageId":
+        """Parse a PageId from a key string."""
         parts = key.split(":")
         if len(parts) != 4:
             raise ValueError(f"Invalid PageId key: {key}")
@@ -25,6 +29,7 @@ class PageId:
         return cls(state=state, school=school, year=int(year_str), page=int(page_str))
 
     def output_path(self, output_root: Path) -> Path:
+        """Get the output file path for this page."""
         return (
             output_root
             / self.state
@@ -34,14 +39,20 @@ class PageId:
         )
 
     def label_path(self, label_root: Path) -> Path:
+        """Get the label file path for this page."""
         return (
             label_root / self.state / self.school / str(self.year) / f"{self.page}.json"
         )
 
     def image_path(self, image_root: Path) -> Path:
+        """Get the image file path for this page."""
         return (
             image_root / self.state / self.school / str(self.year) / f"{self.page}.jpg"
         )
+
+    def __hash__(self) -> int:
+        """Make PageId hashable for use as dict keys."""
+        return hash((self.state, self.school, self.year, self.page))
 
 
 class TextBlock(BaseModel):

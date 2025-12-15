@@ -2,26 +2,41 @@ from __future__ import annotations
 
 import json
 import traceback
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from .enums import ErrorType
 from .models import OcrPageResult, PageId
 
 
-@dataclass(frozen=True, slots=True)
-class RecordOutcome:
+def _map_exception_to_error_type(exc_type_name: str) -> ErrorType:
+    """Map exception type name to ErrorType enum."""
+    mapping = {
+        "JSONDecodeError": ErrorType.JSON_DECODE_ERROR,
+        "ValueError": ErrorType.VALUE_ERROR,
+        "ValidationError": ErrorType.VALIDATION_ERROR,
+        "FileNotFoundError": ErrorType.FILE_NOT_FOUND,
+        "TimeoutError": ErrorType.TIMEOUT_ERROR,
+    }
+    return mapping.get(exc_type_name, ErrorType.UNKNOWN)
+
+
+class RecordOutcome(BaseModel):
+    """Outcome of processing a single record from batch results."""
+
     key: str
     success: bool
-    error: str | None
-    output_path: Path | None
-    error_type: str | None = None
+    error: str | None = None
+    output_path: Path | None = None
+    error_type: ErrorType | None = None
     raw_response_text: str | None = None
     extracted_text: str | None = None
     raw_response_json: str | None = None
     error_traceback: str | None = None
+
+    model_config = {"frozen": True}
 
 
 def extract_text_from_response(response: dict[str, Any]) -> str:
@@ -86,7 +101,7 @@ def process_results_jsonl(
                     success=False,
                     error=f"Invalid JSON on line {idx}: {exc}",
                     output_path=None,
-                    error_type="JSONDecodeError",
+                    error_type=ErrorType.JSON_DECODE_ERROR,
                     error_traceback=traceback.format_exc(),
                 )
             )
@@ -100,7 +115,7 @@ def process_results_jsonl(
                     success=False,
                     error="Missing or invalid record key",
                     output_path=None,
-                    error_type="ValueError",
+                    error_type=ErrorType.VALUE_ERROR,
                 )
             )
             continue
@@ -112,7 +127,7 @@ def process_results_jsonl(
                     success=False,
                     error=str(record.get("error")),
                     output_path=None,
-                    error_type="APIError",
+                    error_type=ErrorType.API_ERROR,
                     raw_response_json=json.dumps(record, ensure_ascii=False),
                 )
             )
@@ -126,7 +141,7 @@ def process_results_jsonl(
                     success=False,
                     error="Missing response",
                     output_path=None,
-                    error_type="MissingResponse",
+                    error_type=ErrorType.MISSING_RESPONSE,
                     raw_response_json=json.dumps(record, ensure_ascii=False),
                 )
             )
@@ -155,7 +170,7 @@ def process_results_jsonl(
             successes[key] = validated
         except ValueError as exc:
             # ValueError from extract_text_from_response or parse_json_from_text
-            error_type = type(exc).__name__
+            error_type = _map_exception_to_error_type(type(exc).__name__)
             outcomes.append(
                 RecordOutcome(
                     key=key,
@@ -182,7 +197,7 @@ def process_results_jsonl(
                     success=False,
                     error=str(exc),
                     output_path=None,
-                    error_type="JSONDecodeError",
+                    error_type=ErrorType.JSON_DECODE_ERROR,
                     raw_response_text=extracted_text,
                     extracted_text=extracted_text,
                     raw_response_json=raw_response_json,
@@ -204,7 +219,7 @@ def process_results_jsonl(
                     success=False,
                     error=str(exc),
                     output_path=None,
-                    error_type="ValidationError",
+                    error_type=ErrorType.VALIDATION_ERROR,
                     raw_response_text=extracted_text,
                     extracted_text=extracted_text,
                     raw_response_json=raw_response_json,
