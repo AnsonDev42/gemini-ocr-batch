@@ -310,8 +310,13 @@ def task_submit_new_batch(
     )
 
     if upload_failures:
+        # Convert Path keys to strings for JSON serialization
+        serializable_failures = {
+            str(path): error for path, error in upload_failures.items()
+        }
         logger.warning(
-            "Image upload failures: %s", json.dumps(upload_failures, ensure_ascii=False)
+            "Image upload failures: %s",
+            json.dumps(serializable_failures, ensure_ascii=False),
         )
 
     uploaded_images = {
