@@ -25,6 +25,7 @@ def test_load_config_creates_output_dir(tmp_path: Path) -> None:
                     "output_dir": str(output_dir),
                 },
                 "model": {"name": "gemini-2.5-flash"},
+                "prompt": {"name": "page_ocr", "template_file": "v1.jinja"},
             }
         ),
         encoding="utf-8",
@@ -46,7 +47,14 @@ def test_load_config_invalid_yaml_raises(tmp_path: Path) -> None:
 def test_load_config_missing_required_field_raises(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        yaml.safe_dump({"paths": {}, "model": {"name": "x"}}), encoding="utf-8"
+        yaml.safe_dump(
+            {
+                "paths": {},
+                "model": {"name": "x"},
+                "prompt": {"name": "page_ocr", "template_file": "v1.jinja"},
+            }
+        ),
+        encoding="utf-8",
     )
 
     with pytest.raises(RuntimeError, match="Config validation failed"):
@@ -64,6 +72,7 @@ def test_load_config_invalid_path_raises(tmp_path: Path) -> None:
                     "output_dir": str(tmp_path / "out"),
                 },
                 "model": {"name": "gemini-2.5-flash"},
+                "prompt": {"name": "page_ocr", "template_file": "v1.jinja"},
             }
         ),
         encoding="utf-8",
@@ -90,6 +99,7 @@ def test_load_config_invalid_year_range_raises(tmp_path: Path) -> None:
                 },
                 "filters": {"target_years": {"start": 1900, "end": 1800}},
                 "model": {"name": "gemini-2.5-flash"},
+                "prompt": {"name": "page_ocr", "template_file": "v1.jinja"},
             }
         ),
         encoding="utf-8",

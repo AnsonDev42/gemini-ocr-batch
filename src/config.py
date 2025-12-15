@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, Mapping
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -86,7 +87,7 @@ class AppConfig(BaseModel):
     model: ModelConfig
     batch: BatchConfig = Field(default_factory=BatchConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
-    prompt: PromptConfig = Field(default_factory=PromptConfig)
+    prompt: PromptConfig
     prefect: PrefectConfig = Field(default_factory=PrefectConfig)
 
 
@@ -99,7 +100,7 @@ class ConfigLoadResult(BaseModel):
     model_config = {"frozen": True}
 
 
-def load_config(config_path: Path) -> ConfigLoadResult:
+def _read_raw_config(config_path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -108,23 +109,54 @@ def load_config(config_path: Path) -> ConfigLoadResult:
         raise RuntimeError(f"Invalid YAML in {config_path}: {exc}") from exc
 
     if raw is None:
-        raw = {}
+        return {}
     if not isinstance(raw, dict):
         raise RuntimeError(
             f"Invalid config root in {config_path}: expected mapping, got {type(raw)}"
         )
+    return raw
 
+
+def _format_validation_errors(exc: ValidationError) -> str:
+    parts = []
+    for err in exc.errors():
+        loc = ".".join(
+            str(segment) for segment in err["loc"] if segment != "__pydantic_self__"
+        )
+        prefix = f"{loc}: " if loc else ""
+        parts.append(f"{prefix}{err['msg']}")
+    return "\n".join(parts)
+
+
+def _build_config(raw: Mapping[str, Any], *, source: Path) -> ConfigLoadResult:
     try:
         config = AppConfig.model_validate(raw)
     except ValidationError as exc:
+        formatted = _format_validation_errors(exc)
         raise RuntimeError(
-            f"Config validation failed for {config_path}:\n{exc}"
+            f"Config validation failed for {source}:\n{formatted}"
         ) from exc
 
-    output_dir = config.paths.output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
+    config.paths.output_dir.mkdir(parents=True, exist_ok=True)
+    return ConfigLoadResult(config=config, path=source)
 
-    return ConfigLoadResult(config=config, path=config_path)
+
+def load_config(config_path: Path) -> ConfigLoadResult:
+    """Load config from disk."""
+    raw = _read_raw_config(config_path)
+    return _build_config(raw, source=config_path)
+
+
+def load_config_data(
+    raw: Mapping[str, Any], *, source: Path | str = "<in-memory>"
+) -> ConfigLoadResult:
+    """
+    Validate an already loaded config mapping.
+
+    Useful for tests or callers that already have YAML decoded.
+    """
+    source_path = Path(source)
+    return _build_config(raw, source=source_path)
 
 
 def resolve_config_path(project_root: Path, cli_path: Path | None) -> Path:
