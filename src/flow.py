@@ -170,6 +170,8 @@ def task_process_batch_results(
             "record_key": outcome.key,
             "status": "success" if outcome.success else "failure",
             "error": outcome.error or "",
+            "raw_response_json": outcome.raw_response_json,
+            "raw_response_text": outcome.raw_response_text,
         }
         if pid:
             row.update(
