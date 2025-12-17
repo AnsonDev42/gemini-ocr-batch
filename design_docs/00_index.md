@@ -8,7 +8,9 @@
 | **Storage Strategy** | **Filesystem-Native** (No Database)         |
 
 ## For LLMs
-Read design_docs/agents.md for the dev rules
+
+Read design_docs/agents.md for the development rules
+
 ## Overview
 
 This system orchestrates the processing of historical course catalogs using Google's Gemini Batch API. It transitions the existing synchronous, single-threaded inference script into a robust, resumable batch processing pipeline.
