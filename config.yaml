@@ -8,12 +8,6 @@ paths:
   output_dir: "dataset/output_results"
 
 # Optional scope filters
-filters:
-  target_states: ["Alabama"]
-  target_years:
-    start: 1849
-    end: 1852
-
 # Example:
 # filters:
 #   target_states: ["Alabama", "California"]
@@ -33,7 +27,7 @@ model:
   name: "gemini-2.5-flash"
   generation_config:
     temperature: 0.1
-    max_output_tokens: 8192
+    max_output_tokens: 16384
     response_mime_type: "application/json"
 
 # Batch API polling
