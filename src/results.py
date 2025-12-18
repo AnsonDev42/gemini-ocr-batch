@@ -7,8 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from .enums import ErrorType
-from .models import OcrPageResult, PageId
+from src.enums import ErrorType
+from src.models import OcrPageResult, PageId
 
 
 def _map_exception_to_error_type(exc_type_name: str) -> ErrorType:

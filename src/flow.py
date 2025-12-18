@@ -10,7 +10,7 @@ from prefect import flow, get_run_logger, task
 from prefect.artifacts import create_markdown_artifact, create_table_artifact
 from prefect.cache_policies import NO_CACHE
 
-from .batch_api import (
+from src.batch_api import (
     create_batch_job,
     download_result_file,
     wait_for_batch_completion,

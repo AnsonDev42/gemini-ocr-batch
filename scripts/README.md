@@ -146,3 +146,5 @@ python analyze_failures.py --export-csv failures.csv
 # Clear everything and start over
 python nuke_database.py --confirm --recreate-tables
 ```
+
+

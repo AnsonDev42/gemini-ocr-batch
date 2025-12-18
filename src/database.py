@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import (
@@ -42,9 +42,12 @@ class ActiveBatch(Base):
     __tablename__ = "active_batches"
 
     batch_id = Column(String, primary_key=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+        nullable=False,
     )
     status = Column(String, default=BatchStatus.ACTIVE.value, nullable=False)
 
@@ -59,7 +62,7 @@ class BatchRecordKey(Base):
 
     batch_id = Column(String, primary_key=True)
     record_key = Column(String, primary_key=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("idx_batch_record_keys_batch_id", "batch_id"),
@@ -73,7 +76,10 @@ class FailureCount(Base):
     record_key = Column(String, primary_key=True)
     count = Column(Integer, default=0, nullable=False)
     last_updated = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+        nullable=False,
     )
 
     __table_args__ = (Index("idx_failure_counts_record_key", "record_key"),)
@@ -84,7 +90,7 @@ class InflightRecord(Base):
 
     record_key = Column(String, primary_key=True)
     batch_id = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("idx_inflight_records_batch_id", "batch_id"),
@@ -109,7 +115,7 @@ class FailureLog(Base):
     prompt_name = Column(String)
     prompt_template = Column(String)
     generation_config = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("idx_failure_logs_record_key", "record_key"),

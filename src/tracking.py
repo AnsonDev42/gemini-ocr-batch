@@ -7,7 +7,7 @@ from typing import Any
 from braintrust import init_logger, start_span
 from pydantic import BaseModel
 
-from .models import OcrPageResult, PageId
+from src.models import OcrPageResult, PageId
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from .models import PageId
+from src.models import PageId
 
 
 class ScanResult(BaseModel):

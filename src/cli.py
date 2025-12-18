@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .config import load_config
-from .env import load_env
-from .flow import orchestrate_gemini_batch
+from src.config import load_config
+from src.env import load_env
+from src.flow import orchestrate_gemini_batch
 
 
 def build_parser() -> argparse.ArgumentParser:

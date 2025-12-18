@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
 
-from .database import (
+from src.database import (
     FailureLog,
     get_session,
     init_database,
@@ -34,7 +34,7 @@ class SQLiteStateStore:
 
     def add_batch(self, batch_id: str, record_keys: list[str]) -> None:
         """Add a new batch and its record keys."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with get_session() as session:
             # Insert or update active batch
             session.execute(
@@ -130,7 +130,7 @@ class SQLiteStateStore:
                 {
                     "batch_id": batch_id,
                     "status": BatchStatus.COMPLETED.value,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                 },
             )
 
@@ -175,7 +175,7 @@ class SQLiteStateStore:
 
     def increment_failure_counts(self, failures: dict[str, str]) -> dict[str, int]:
         """Increment failure counts for given record keys."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with get_session() as session:
             for record_key in failures:
                 session.execute(
@@ -213,7 +213,7 @@ class SQLiteStateStore:
         """
         if not record_keys:
             return
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with get_session() as session:
             for record_key in record_keys:
                 session.execute(
