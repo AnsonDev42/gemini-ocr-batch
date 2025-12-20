@@ -44,29 +44,29 @@ graph TD
     A --> D[Batch Builder]
     A --> E[Gemini Batch API]
     A --> F[Braintrust Tracker]
-    
+  
     B --> G[Active Batches]
     B --> H[Inflight Records]
     B --> I[Failure Counts]
     B --> J[Failure Logs]
-    
+  
     C --> K[Filesystem Scan]
     K --> L[Dependency Resolution]
     L --> M[Runnable Pages]
-    
+  
     D --> N[File Upload]
     D --> O[JSONL Creation]
     O --> E
-    
+  
     E --> P[Batch Polling]
     P --> Q[Result Download]
     Q --> R[Validation]
     R --> S[Output Persistence]
-    
+  
     F --> T[Braintrust Logging]
     T --> U[Prompt Tracking]
     T --> V[Error Analysis]
-    
+  
     style A fill:#e1f5ff
     style F fill:#fff4e1
     style B fill:#e8f5e9
@@ -110,6 +110,7 @@ The system includes a full prompt registry system:
 - **Context-Aware Prompts**: Automatically includes previous page context when available
 
 Example prompt structure:
+
 ```
 prompts/
 └── page_ocr/
@@ -119,6 +120,7 @@ prompts/
 ```
 
 Each logged inference includes the prompt template name and version, enabling:
+
 - A/B testing of prompt versions
 - Performance comparison across prompt iterations
 - Debugging prompt-related failures
@@ -166,6 +168,7 @@ All state is managed in a SQLite database (`data/gemini_batches.db`):
 ### Deployment & Scheduling
 
 The flow can be:
+
 - Run once via CLI: `uv run python -m src.cli run-once`
 - Scheduled via Prefect: Configure `schedule_interval_minutes` in config
 - Deployed as a Prefect deployment for production use
@@ -206,6 +209,7 @@ Edit `config.yaml` to configure:
 - **Prompt**: Prompt registry directory, name, and template file
 
 Example configuration:
+
 ```yaml
 paths:
   label_source_dir: "dataset/label_to_curricular"
@@ -241,7 +245,7 @@ prompt:
 
 ```bash
 # Run once (processes available work and exits)
-uv run python -m src.cli run-once
+uv run python -m src run-once
 
 # Or run directly with Prefect
 uv run prefect flow run orchestrate_gemini_batch
@@ -295,4 +299,3 @@ gemini-ocr-batch/
 - **Observability First**: Comprehensive logging enables debugging and analysis without re-running batches
 
 For detailed architecture documentation, see the `design_docs/` directory.
-
